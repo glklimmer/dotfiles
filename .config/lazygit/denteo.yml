@@ -1,0 +1,9 @@
+services:
+  "git.panter.ch": "gitlab:git.panter.ch"
+
+customCommands:
+  - key: "o"
+    context: "localBranches"
+    description: "Open MR in browser (existing, else create)"
+    command: 'glab mr view "{{.SelectedLocalBranch.Name}}" --web || glab mr create --web --source-branch "{{.SelectedLocalBranch.Name}}"'
+    output: log
