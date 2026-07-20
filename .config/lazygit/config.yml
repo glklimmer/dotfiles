@@ -1,5 +1,9 @@
 os:
   editPreset: "nvim"
+  edit: "/opt/nvim-linux-x86_64/bin/nvim -- {{filename}}"
+  editAtLine: "/opt/nvim-linux-x86_64/bin/nvim +{{line}} -- {{filename}}"
+  editAtLineAndWait: "/opt/nvim-linux-x86_64/bin/nvim +{{line}} -- {{filename}}"
+  editInTerminal: true
 
 gui:
   nerdFontsVersion: "3"
