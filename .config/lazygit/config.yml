@@ -4,6 +4,9 @@ os:
   editAtLine: "/opt/nvim-linux-x86_64/bin/nvim +{{line}} -- {{filename}}"
   editAtLineAndWait: "/opt/nvim-linux-x86_64/bin/nvim +{{line}} -- {{filename}}"
   editInTerminal: true
+  # In a tmux popup, xclip is killed with the popup and the selection dies with it.
+  # Hand the text to tmux instead, which forwards it to the terminal via OSC 52.
+  copyToClipboardCmd: 'if [ -n "$TMUX" ]; then printf "%s" {{text}} | tmux load-buffer -w -; else printf "%s" {{text}} | xclip -selection clipboard -i; fi'
 
 gui:
   nerdFontsVersion: "3"
