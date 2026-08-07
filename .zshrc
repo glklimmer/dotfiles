@@ -42,6 +42,11 @@ source $ZSH/oh-my-zsh.sh
 alias ade="shutdown 0"
 alias cya="shutdown -r 0"
 alias dotfiles="/usr/bin/git --git-dir=$HOME/.dotfiles --work-tree=$HOME" 
+alias ppcassets="cd $HOME/Development/rust/warppcs/client/assets/" 
+alias ppc="$HOME/Development/rust/warppcs/target/release/ppc_console"
+
+# Add nvim to PATH
+export PATH="$PATH:/opt/nvim/bin"
 
 # Set editor
 export EDITOR=nvim
@@ -52,6 +57,9 @@ export PATH="$HOME/denteo/dental/script:$PATH"
 
 # RTX version manager
 eval "$(~/.local/bin/mise activate zsh)"
+
+# mason path
+export PATH="$HOME/.local/share/nvim/mason/bin:$PATH"
 
 # scripts path
 export PATH="$HOME/scripts:$PATH"
@@ -68,4 +76,3 @@ function yy() {
 
 # minizinc
 export PATH="/usr/local/MiniZincIDE-2.8.3-bundle-linux-x86_64/bin:$PATH"
-
