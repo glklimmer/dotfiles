@@ -3,6 +3,8 @@ configuration {
   display-window: "_";
   drun-display-format: "{name}";
   modi: "window,run,drun";
+  show-icons: true;
+  icon-theme: "Papirus";
 }
 
 @theme "/dev/null"
