@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+tmux display-message -p '#{session_name}' >/dev/null 2>&1 || {
+  echo "Run this inside tmux"
+  exit 1
+}
+
+top="$(tmux display-message -p '#{pane_id}')"
+tmux kill-pane -a -t "$top"
+tmux send-keys -t "$top" C-c 'reset' C-m
+
+tmux split-window -v -t "$top"
+bottom_left="$(tmux display-message -p '#{pane_id}')"
+tmux send-keys -t "$bottom_left" C-c 'reset' C-m
+
+tmux split-window -h -t "$bottom_left"
+bottom_mid="$(tmux display-message -p '#{pane_id}')"
+tmux send-keys -t "$bottom_mid" C-c 'reset' C-m
+
+tmux split-window -h -t "$bottom_mid"
+bottom_right="$(tmux display-message -p '#{pane_id}')"
+tmux send-keys -t "$bottom_right" C-c 'reset' C-m
+
+wh="$(tmux display-message -p '#{window_height}')"
+tmux resize-pane -t "$top" -y "$((wh / 2))"
+
+ww="$(tmux display-message -p '#{window_width}')"
+third=$((ww / 3))
+tmux resize-pane -t "$bottom_left" -x "$third"
+tmux resize-pane -t "$bottom_mid" -x "$third"
+
+tmux send-keys -t "$top" ' cargo run -p client -- server' C-m
+tmux send-keys -t "$bottom_left" ' cargo run -p client' C-m
+tmux send-keys -t "$bottom_mid" ' cargo run -p client' C-m
+tmux send-keys -t "$bottom_right" ' cargo run -p client' C-m

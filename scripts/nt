@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO="dental"
+
+usage() {
+  cat >&2 <<EOF
+Usage: $(basename "$0") [-r dental|dhc] <branch-name> [prompt...]
+
+Examples:
+    $(basename "$0") feat/1234-add-feature
+    $(basename "$0") -r dhc feat/1234-add-feature
+    $(basename "$0") feat/1234-add-feature "Read HANDOFF.md and implement it"
+
+Creates (or reuses) a worktree for <branch> in the selected repo, opens a new
+tmux window in it, runs bin/setup-worktree, then starts claude once setup
+completes. Defaults to dental; -r dhc targets ~/denteo/dhc.
+
+If a prompt is given, the new claude session is seeded with it (claude
+--continue when reusing an existing worktree). For long handoffs, put the
+spec in a file and pass a short prompt that points claude at it.
+EOF
+  exit 1
+}
+
+while getopts ":r:h" opt; do
+  case "$opt" in
+    r) REPO="$OPTARG" ;;
+    h) usage ;;
+    *) usage ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+[ $# -ge 1 ] || usage
+
+if [ -z "${TMUX:-}" ]; then
+  echo "Error: must be run inside a tmux session." >&2
+  exit 1
+fi
+
+BRANCH="$1"
+shift
+PROMPT="$*"
+
+# Per-repo worktree tooling. Both CLIs take the same `code:<cmd> <branch>`
+# arguments, so only the path and the entrypoint differ.
+case "$REPO" in
+  dental)
+    REPO_DIR="$HOME/denteo/dental"
+    CREATE_CMD="script/pan.do"
+    ;;
+  dhc)
+    REPO_DIR="$HOME/denteo/dhc"
+    CREATE_CMD="bin/ws"
+    ;;
+  *)
+    echo "Error: unknown repo '$REPO' (expected dental or dhc)" >&2
+    exit 1
+    ;;
+esac
+
+if [ ! -d "$REPO_DIR" ]; then
+  echo "Error: $REPO_DIR not found" >&2
+  exit 1
+fi
+
+find_worktree() {
+  git -C "$REPO_DIR" worktree list --porcelain | awk -v b="$BRANCH" '
+    /^worktree / { wt = substr($0, 10); next }
+    /^branch refs\/heads\// {
+      if (!found && substr($0, 19) == b) { found = wt }
+    }
+    END { if (found) print found }
+  '
+}
+
+WORKTREE_DIR=$(find_worktree)
+
+if [ -n "$WORKTREE_DIR" ] && [ -d "$WORKTREE_DIR" ]; then
+  echo "Reusing existing $REPO worktree at $WORKTREE_DIR"
+  CLAUDE_CMD="claude --continue"
+else
+  CLAUDE_CMD="claude"
+  # Pick code:checkout if branch exists locally or on origin, otherwise code:new
+  if git -C "$REPO_DIR" show-ref --verify --quiet "refs/heads/$BRANCH" ||
+    git -C "$REPO_DIR" ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+    SUBCMD="code:checkout"
+  else
+    SUBCMD="code:new"
+  fi
+
+  echo "Creating $REPO worktree for $BRANCH ($CREATE_CMD $SUBCMD)"
+  (cd "$REPO_DIR" && "$CREATE_CMD" "$SUBCMD" "$BRANCH")
+
+  WORKTREE_DIR=$(find_worktree)
+
+  if [ -z "$WORKTREE_DIR" ] || [ ! -d "$WORKTREE_DIR" ]; then
+    echo "Error: could not locate $REPO worktree for branch $BRANCH" >&2
+    exit 1
+  fi
+fi
+
+# Auto-accept mode: when NT_AUTO is set, run claude with its permission prompts
+# off so a handoff agent works unattended. Opt-in so interactive reuse stays safe.
+if [ -n "${NT_AUTO:-}" ]; then
+  CLAUDE_CMD="$CLAUDE_CMD --permission-mode auto"
+fi
+
+# Seed the new claude session with the prompt, if one was given. The prompt is
+# written to a temp file and read (then removed) in the NEW window's shell, so
+# arbitrary content — quotes, backticks, $ — survives without any escaping.
+if [ -n "$PROMPT" ]; then
+  PROMPT_FILE=$(mktemp)
+  printf '%s' "$PROMPT" >"$PROMPT_FILE"
+  CLAUDE_CMD="$CLAUDE_CMD \"\$(cat '$PROMPT_FILE'; rm -f '$PROMPT_FILE')\""
+fi
+
+# Single pane: run setup-worktree to completion, then launch claude.
+# '&&' guarantees claude only starts once setup has fully succeeded, so the
+# worktree env, deps, and db are ready — no racing on partial setup.
+NEW_WIN_ID=$(tmux new-window -d -P -F '#{window_id}' -c "$WORKTREE_DIR" \
+  "bin/setup-worktree && $CLAUDE_CMD; exec \$SHELL")
+
+# Title: leading ticket number if present, otherwise first dashed word
+TITLE="${BRANCH##*/}"
+NUM="${TITLE%%[!0-9]*}"
+if [ -n "$NUM" ]; then
+  TITLE="$NUM"
+else
+  TITLE="${TITLE%%-*}"
+fi
+if [ "$REPO" != "dental" ]; then
+  TITLE="$REPO/$TITLE"
+fi
+tmux rename-window -t "$NEW_WIN_ID" "$TITLE"
+tmux set-window-option -t "$NEW_WIN_ID" automatic-rename off

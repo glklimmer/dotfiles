@@ -1,0 +1,37 @@
+#!/bin/zsh
+
+# Check if hist_ignore_space is set
+if ! (( $+options[histignorepace] )); then
+  setopt hist_ignore_space
+  local RESET_HIST_IGNORE_SPACE=1
+fi
+
+# Rename the current session to "anamnesis"
+tmux rename-session 'anamnesis'
+
+# Navigate to the specific folder in tmux
+cd ~/denteo/anamnesis
+tmux send-keys ' cd ~/denteo/anamnesis' C-m
+
+# Rename the current window to "nvim"
+tmux rename-window 'nvim'
+
+# Run nvim in the current pane
+tmux send-keys ' nvim' C-m
+
+# Create a new window and name it "anamnesis server"
+tmux new-window -n 'anamnesis server'
+
+# Navigate to the specific folder
+tmux send-keys ' cd ~/denteo/anamnesis' C-m
+
+# Run `npm run dev`
+tmux send-keys ' npm run dev' C-m
+
+# Select the "nvim" window
+tmux select-window -t nvim
+
+# If hist_ignore_space was not set before, unset it
+if (( $RESET_HIST_IGNORE_SPACE )); then
+  unsetopt hist_ignore_space
+fi

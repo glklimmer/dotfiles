@@ -1,0 +1,25 @@
+#!/bin/zsh
+
+# Check if hist_ignore_space is set
+if ! (( $+options[histignorepace] )); then
+  setopt hist_ignore_space
+  local RESET_HIST_IGNORE_SPACE=1
+fi
+
+# Rename the current session to "denteo"
+tmux rename-session 'denteo'
+
+# Navigate to the specific folder in tmux
+cd ~/denteo/dental
+tmux send-keys ' cd ~/denteo/dental' C-m
+
+# Split the window vertically 
+tmux split-window -h
+
+# Run claude in the current pane
+tmux send-keys ' claude' C-m
+
+# If hist_ignore_space was not set before, unset it
+if (( $RESET_HIST_IGNORE_SPACE )); then
+  unsetopt hist_ignore_space
+fi

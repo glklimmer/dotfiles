@@ -1,0 +1,42 @@
+#!/bin/zsh
+
+# Check if hist_ignore_space is set
+if ! (( $+options[histignorepace] )); then
+  setopt hist_ignore_space
+  local RESET_HIST_IGNORE_SPACE=1
+fi
+
+# Rename the current session to "warppcs"
+tmux rename-session 'warppcs'
+
+# Navigate to the specific folder in tmux
+cd ~/Development/rust/warppcs
+tmux send-keys ' cd ~/Development/rust/warppcs' C-m
+
+# Rename the current window to "nvim"
+tmux rename-window 'nvim'
+
+# Run nvim in the current pane
+tmux send-keys ' nvim' C-m
+
+# Create a new window and name it "test"
+tmux new-window -n 'test'
+
+# Navigate to the specific folder and enter "pp" command
+tmux send-keys ' cd ~/Development/rust/warppcs' C-m
+tmux send-keys ' pp'
+
+# Create a new window and name it "bacon"
+tmux new-window -n 'bacon'
+
+# Navigate to the specific folder and run command
+tmux send-keys ' cd ~/Development/rust/warppcs' C-m
+tmux send-keys ' bacon clippy' C-m
+
+# Select the "nvim" window
+tmux select-window -t nvim
+
+# If hist_ignore_space was not set before, unset it
+if (( $RESET_HIST_IGNORE_SPACE )); then
+  unsetopt hist_ignore_space
+fi

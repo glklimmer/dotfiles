@@ -1,0 +1,5 @@
+#!/bin/zsh
+
+cd /home/noodle/.steam/steam/steamapps/common/Aseprite
+
+nohup ./aseprite > /dev/null 2>&1 &

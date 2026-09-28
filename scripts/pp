@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# must be inside tmux
+tmux display-message -p '#{session_name}' >/dev/null 2>&1 || {
+  echo "Run this inside tmux"
+  exit 1
+}
+
+# keep current pane as LEFT, kill others
+left="$(tmux display-message -p '#{pane_id}')"
+tmux kill-pane -a -t "$left"
+
+# stop anything running and clear left
+tmux send-keys -t "$left" C-c 'reset' C-m
+
+# create RIGHT (left/right == tmux -h)
+tmux split-window -h
+right="$(tmux display-message -p '#{pane_id}')"
+
+# stop anything running and clear right
+tmux send-keys -t "$right" C-c 'reset' C-m
+
+# start commands (no -l, so C-m is Enter)
+tmux send-keys -t "$left" ' cargo run -p client -- server' C-m
+tmux send-keys -t "$right" ' cargo run -p client' C-m
+
+# make columns even (left/right)
+tmux select-layout even-vertical
