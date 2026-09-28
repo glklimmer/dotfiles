@@ -1,8 +1,8 @@
 os:
   editPreset: "nvim"
-  edit: "/opt/nvim-linux-x86_64/bin/nvim -- {{filename}}"
-  editAtLine: "/opt/nvim-linux-x86_64/bin/nvim +{{line}} -- {{filename}}"
-  editAtLineAndWait: "/opt/nvim-linux-x86_64/bin/nvim +{{line}} -- {{filename}}"
+  edit: "/opt/nvim/bin/nvim -- {{filename}}"
+  editAtLine: "/opt/nvim/bin/nvim +{{line}} -- {{filename}}"
+  editAtLineAndWait: "/opt/nvim/bin/nvim +{{line}} -- {{filename}}"
   editInTerminal: true
   # In a tmux popup, xclip is killed with the popup and the selection dies with it.
   # Hand the text to tmux instead, which forwards it to the terminal via OSC 52.
