@@ -1,0 +1,5 @@
+" Tabs on H/L, history on J/K (swapped from the defaults)
+bind H tabprev
+bind L tabnext
+bind J back
+bind K forward

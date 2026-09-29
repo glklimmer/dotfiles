@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<schemalist>
-  <schema id="org.gnome.shell.extensions.super-key" path="/org/gnome/shell/extensions/super-key/">
-    <key name="overlay-key-action" type="s">
-      <default>"nautilus"</default>
-    </key>
-  </schema>
-</schemalist>

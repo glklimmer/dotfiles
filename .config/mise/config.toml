@@ -1,0 +1,5 @@
+[tools]
+lazygit = "latest"
+node = "lts"
+tree-sitter = "latest"
+yazi = "latest"
