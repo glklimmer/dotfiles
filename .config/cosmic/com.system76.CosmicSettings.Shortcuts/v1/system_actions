@@ -1,4 +1,3 @@
 {
-    /// Super+T: Alacritty with a fresh tmux session
     Terminal: "/home/noodles/.cargo/bin/alacritty -e /usr/bin/tmux new-session",
 }
