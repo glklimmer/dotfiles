@@ -1,0 +1,186 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat >&2 <<EOF
+Usage: $(basename "$0")
+
+Installs every tool and program this machine needs (Pop!_OS / Ubuntu) and
+wires up the dotfiles. Safe to re-run: each step skips what is already there.
+
+Fresh machine:
+    bash <(curl -fsSL https://raw.githubusercontent.com/glklimmer/dotfiles/master/scripts/bootstrap)
+EOF
+  exit 1
+}
+
+[ $# -eq 0 ] || usage
+
+APT_PACKAGES=(
+  zsh tmux curl unzip p7zip-full build-essential
+  ripgrep fd-find fzf jq xclip wl-clipboard
+  ffmpegthumbnailer imagemagick poppler-utils
+  gh glab
+  # alacritty build deps
+  cmake g++ pkg-config libfontconfig1-dev libxcb-xfixes0-dev libxkbcommon-dev python3
+  # denteo
+  postgresql libpq-dev libvips libicu-dev libyaml-dev qpdf qrencode ffmpeg dcmtk
+)
+
+FLATPAKS=(com.google.Chrome com.slack.Slack com.spotify.Client)
+
+ZSH_PLUGINS=(
+  https://github.com/zsh-users/zsh-autosuggestions
+  https://github.com/zsh-users/zsh-syntax-highlighting
+  https://github.com/jeffreytse/zsh-vi-mode
+)
+
+TRIDACTYL_NATIVE_VERSION=1.25.1
+
+step() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
+has() { command -v "$1" &>/dev/null; }
+
+clone() {
+  local url="$1" dir="$2"
+  [ -d "$dir" ] || git clone --depth 1 "$url" "$dir"
+}
+
+install_apt_packages() {
+  step "apt packages"
+  sudo apt-get update
+  sudo apt-get install -y "${APT_PACKAGES[@]}"
+  mkdir -p "$HOME/.local/bin"
+  ln -sf /usr/bin/fdfind "$HOME/.local/bin/fd"
+}
+
+install_dotfiles() {
+  step "dotfiles"
+  local dotfiles=(git --git-dir="$HOME/.dotfiles" --work-tree="$HOME")
+  if [ ! -d "$HOME/.dotfiles" ]; then
+    git clone --bare https://github.com/glklimmer/dotfiles.git "$HOME/.dotfiles"
+    mkdir -p "$HOME/.dotfiles-backup"
+    "${dotfiles[@]}" ls-files | while read -r file; do
+      if [ -e "$HOME/$file" ]; then
+        mkdir -p "$HOME/.dotfiles-backup/$(dirname "$file")"
+        mv "$HOME/$file" "$HOME/.dotfiles-backup/$file"
+      fi
+    done
+    "${dotfiles[@]}" checkout
+  fi
+  "${dotfiles[@]}" config status.showUntrackedFiles no
+}
+
+install_zsh() {
+  step "zsh + oh-my-zsh"
+  if [ ! -d "$HOME/.oh-my-zsh" ]; then
+    RUNZSH=no CHSH=no KEEP_ZSHRC=yes \
+      sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+  fi
+  local plugin
+  for plugin in "${ZSH_PLUGINS[@]}"; do
+    clone "$plugin" "$HOME/.oh-my-zsh/custom/plugins/$(basename "$plugin")"
+  done
+  if [ "$(getent passwd "$USER" | cut -d: -f7)" != "$(command -v zsh)" ]; then
+    sudo chsh -s "$(command -v zsh)" "$USER"
+  fi
+}
+
+install_mise() {
+  step "mise + global tools"
+  [ -x "$HOME/.local/bin/mise" ] || curl -fsSL https://mise.run | sh
+  "$HOME/.local/bin/mise" install
+}
+
+install_rust() {
+  step "rust + alacritty"
+  has rustup || curl -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path
+  # shellcheck source=/dev/null
+  . "$HOME/.cargo/env"
+  has alacritty || cargo install alacritty
+}
+
+install_neovim() {
+  step "neovim"
+  if [ ! -x /opt/nvim/bin/nvim ]; then
+    local tmp
+    tmp="$(mktemp -d)"
+    curl -fsSL https://github.com/neovim/neovim/releases/latest/download/nvim-linux-x86_64.tar.gz |
+      tar -xz -C "$tmp"
+    sudo rm -rf /opt/nvim
+    sudo mv "$tmp/nvim-linux-x86_64" /opt/nvim
+    rm -rf "$tmp"
+  fi
+  if [ ! -d "$HOME/.config/nvim" ]; then
+    git clone https://github.com/glklimmer/nvim-config.git "$HOME/.config/nvim"
+    git -C "$HOME/.config/nvim" remote set-url origin git@github.com:glklimmer/nvim-config.git
+  fi
+}
+
+install_tmux_plugins() {
+  step "tmux plugins"
+  clone https://github.com/tmux-plugins/tpm "$HOME/.tmux/plugins/tpm"
+  TMUX_PLUGIN_MANAGER_PATH="$HOME/.config/tmux/plugins/" "$HOME/.tmux/plugins/tpm/bin/install_plugins"
+}
+
+install_flatpaks() {
+  step "flatpaks"
+  flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+  flatpak install --user -y --noninteractive flathub "${FLATPAKS[@]}"
+}
+
+install_tridactyl_native() {
+  step "tridactyl native messenger"
+  [ -x "$HOME/.local/share/tridactyl/native_main" ] ||
+    curl -fsSL https://raw.githubusercontent.com/tridactyl/native_messenger/master/installers/install.sh |
+    sh -s -- "$TRIDACTYL_NATIVE_VERSION"
+}
+
+install_claude() {
+  step "claude code"
+  [ -x "$HOME/.local/bin/claude" ] || curl -fsSL https://claude.ai/install.sh | bash
+}
+
+enable_services() {
+  step "systemd user services"
+  systemctl --user daemon-reload
+  systemctl --user enable --now theme-sync.service
+}
+
+setup_denteo() {
+  step "denteo"
+  sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname = '$USER'" | grep -q 1 ||
+    sudo -u postgres createuser --superuser "$USER"
+
+  mkdir -p "$HOME/denteo"
+  local repo
+  for repo in panter/dental denteo/dhc; do
+    local dir="$HOME/denteo/$(basename "$repo")"
+    [ -d "$dir" ] || git clone "git@git.panter.ch:$repo.git" "$dir" ||
+      echo "Could not clone $repo — add your SSH key to git.panter.ch and re-run."
+  done
+
+  if [ -d "$HOME/denteo/dental" ]; then
+    cd "$HOME/denteo/dental"
+    "$HOME/.local/bin/mise" trust
+    "$HOME/.local/bin/mise" install
+    "$HOME/.local/bin/mise" exec -- bun install
+    "$HOME/.local/bin/mise" exec -- bunx playwright install --with-deps chromium
+    cd - >/dev/null
+  fi
+}
+
+install_apt_packages
+install_dotfiles
+install_zsh
+install_mise
+install_rust
+install_neovim
+install_tmux_plugins
+install_flatpaks
+install_tridactyl_native
+install_claude
+enable_services
+setup_denteo
+
+step "done"
+echo "Next: log out and back in (zsh), then run bin/setup in ~/denteo/dental."

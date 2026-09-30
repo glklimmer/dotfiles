@@ -75,8 +75,5 @@ function yy() {
 	rm -f -- "$tmp"
 }
 
-# minizinc
-export PATH="/usr/local/MiniZincIDE-2.8.3-bundle-linux-x86_64/bin:$PATH"
-
 # Machine-local config and secrets, not tracked in dotfiles
 [ -f ~/.zshrc.local ] && source ~/.zshrc.local
