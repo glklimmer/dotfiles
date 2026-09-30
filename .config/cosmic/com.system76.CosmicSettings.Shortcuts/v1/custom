@@ -1,0 +1,4 @@
+{
+    (modifiers: [Super, Shift], key: "j"): MoveToNextWorkspace,
+    (modifiers: [Super, Shift], key: "k"): MoveToPreviousWorkspace,
+}
