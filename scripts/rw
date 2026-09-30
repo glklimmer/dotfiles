@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+STATE_FILE="${NT_STATE_FILE:-$HOME/.local/state/nt/windows}"
+
+usage() {
+  cat >&2 <<EOF
+Usage: $(basename "$0")
+
+Restore work: runs \`nt -r <repo> <branch>\` for each entry saved by sw,
+skipping branches that already have a window open. The worktrees still exist,
+so nt starts \`claude --continue\` and each window resumes its last session.
+EOF
+  exit 1
+}
+
+[ $# -eq 0 ] || usage
+
+if [ -z "${TMUX:-}" ]; then
+  echo "Error: must be run inside a tmux session." >&2
+  exit 1
+fi
+
+if [ ! -s "$STATE_FILE" ]; then
+  echo "Nothing saved in $STATE_FILE (run sw first)" >&2
+  exit 1
+fi
+
+OPEN=$(sw -l)
+
+while read -r repo branch; do
+  [ -n "$branch" ] || continue
+  if grep -qxF "$repo $branch" <<<"$OPEN"; then
+    echo "Already open: $repo $branch"
+    continue
+  fi
+  nt -r "$repo" "$branch" </dev/null
+done <"$STATE_FILE"

@@ -40,8 +40,22 @@ source ~/.config/zsh/muse-ansi.zsh-theme
 # alias ohmyzsh="mate ~/.oh-my-zsh"
 
 # Aliases
-alias ade="shutdown 0"
 alias cya="shutdown -r 0"
+
+# Shuts down, first offering to save the denteo session's worktree windows (sw)
+# when that session is open and differs from what was last saved.
+ade() {
+  local saved=${NT_STATE_FILE:-$HOME/.local/state/nt/windows}
+  if tmux has-session -t denteo 2>/dev/null &&
+    [ "$(sw -s denteo -l)" != "$(cat $saved 2>/dev/null)" ] &&
+    read -q "?Save work (sw) first? [y/N] "; then
+    echo
+    sw -s denteo || return
+  fi
+  echo
+  shutdown 0
+}
+
 alias dotfiles="/usr/bin/git --git-dir=$HOME/.dotfiles --work-tree=$HOME" 
 alias ppcassets="cd $HOME/Development/rust/warppcs/client/assets/" 
 alias ppc="$HOME/Development/rust/warppcs/target/release/ppc_console"

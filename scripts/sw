@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+STATE_FILE="${NT_STATE_FILE:-$HOME/.local/state/nt/windows}"
+SESSION=""
+LIST_ONLY=""
+
+usage() {
+  cat >&2 <<EOF
+Usage: $(basename "$0") [-s <session>] [-l]
+
+Save work: records every window of a tmux session that sits in a dental or dhc
+worktree as "<repo> <branch>" in $STATE_FILE, so rw can reopen them with nt
+later.
+
+  -s <session>  Session to read (default: the current one; works outside tmux).
+  -l            Print the entries without saving them.
+EOF
+  exit 1
+}
+
+while getopts ":s:lh" opt; do
+  case "$opt" in
+    s) SESSION="$OPTARG" ;;
+    l) LIST_ONLY=1 ;;
+    *) usage ;;
+  esac
+done
+shift $((OPTIND - 1))
+[ $# -eq 0 ] || usage
+
+if [ -z "$SESSION" ] && [ -z "${TMUX:-}" ]; then
+  echo "Error: run inside tmux or pass -s <session>." >&2
+  exit 1
+fi
+
+# Prints "<repo> <branch>" for a path inside a linked worktree of a known repo.
+# The main checkouts are skipped because nt never opens windows there.
+entry_for_path() {
+  local path="$1" common top branch repo
+  common=$(git -C "$path" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 0
+  top=$(git -C "$path" rev-parse --show-toplevel 2>/dev/null) || return 0
+  case "$common" in
+    "$HOME/denteo/dental/.git") repo=dental ;;
+    "$HOME/denteo/dhc/.git") repo=dhc ;;
+    *) return 0 ;;
+  esac
+  [ "$top" = "${common%/.git}" ] && return 0
+  branch=$(git -C "$path" branch --show-current)
+  [ -n "$branch" ] && echo "$repo $branch"
+}
+
+current_entries() {
+  local target=()
+  [ -n "$SESSION" ] && target=(-t "$SESSION")
+  tmux list-windows "${target[@]}" -F '#{pane_current_path}' | while read -r path; do
+    entry_for_path "$path"
+  done | awk '!seen[$0]++'
+}
+
+if [ -n "$LIST_ONLY" ]; then
+  current_entries
+  exit 0
+fi
+
+mkdir -p "$(dirname "$STATE_FILE")"
+current_entries >"$STATE_FILE"
+echo "Saved $(wc -l <"$STATE_FILE") window(s) to $STATE_FILE"
+cat "$STATE_FILE"
