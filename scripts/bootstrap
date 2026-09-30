@@ -138,6 +138,8 @@ install_tridactyl_native() {
 install_claude() {
   step "claude code"
   [ -x "$HOME/.local/bin/claude" ] || curl -fsSL https://claude.ai/install.sh | bash
+  "$HOME/.local/bin/claude" plugin marketplace add "$HOME/.config/tmux/plugins/tmux-claude-status"
+  "$HOME/.local/bin/claude" plugin install tmux-claude-status@tmux-claude-status
 }
 
 enable_services() {
