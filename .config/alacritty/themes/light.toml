@@ -51,7 +51,7 @@ yellow = '#DF8E1D' # yellow
 blue = '#1E66F5' # blue
 magenta = '#EA76CB' # pink
 cyan = '#179299' # teal
-white = '#ACB0BE' # surface2
+white = '#6C6F85' # subtext0
 
 # Bright colors
 [colors.bright]
@@ -62,7 +62,7 @@ yellow = '#DF8E1D' # yellow
 blue = '#1E66F5' # blue
 magenta = '#EA76CB' # pink
 cyan = '#179299' # teal
-white = '#BCC0CC' # surface1
+white = '#4C4F69' # text
 
 # Dim colors
 [colors.dim]
@@ -73,4 +73,4 @@ yellow = '#DF8E1D' # yellow
 blue = '#1E66F5' # blue
 magenta = '#EA76CB' # pink
 cyan = '#179299' # teal
-white = '#ACB0BE' # surface2
+white = '#6C6F85' # subtext0
