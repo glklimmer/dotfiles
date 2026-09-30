@@ -18,7 +18,7 @@ EOF
 
 APT_PACKAGES=(
   zsh tmux curl unzip p7zip-full build-essential
-  ripgrep fd-find fzf jq xclip wl-clipboard
+  ripgrep fd-find fzf jq xclip wl-clipboard htop
   ffmpegthumbnailer imagemagick poppler-utils
   gh glab
   # alacritty build deps
