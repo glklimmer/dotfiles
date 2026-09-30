@@ -24,7 +24,7 @@ APT_PACKAGES=(
   # alacritty build deps
   cmake g++ pkg-config libfontconfig1-dev libxcb-xfixes0-dev libxkbcommon-dev python3
   # denteo
-  postgresql libpq-dev libvips libicu-dev libyaml-dev qpdf qrencode ffmpeg dcmtk
+  postgresql postgresql-16-pgvector libpq-dev libvips libicu-dev libyaml-dev qpdf qrencode ffmpeg dcmtk
 )
 
 FLATPAKS=(com.google.Chrome com.slack.Slack com.spotify.Client)
