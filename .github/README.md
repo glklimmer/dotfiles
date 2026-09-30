@@ -16,9 +16,13 @@ after adding something to it:
 bootstrap
 ```
 
+It asks for your git name and emails and the Sentry URL/token, and walks you
+through `gh` / `glab` login (uploading a fresh SSH key). Nothing personal or
+secret is committed here: git identity lives in `~/.gitconfig{,-denteo}` and
+secrets in `~/.zshrc.local`, both machine-local.
+
 Afterwards, log out and back in (zsh becomes the login shell) and run `bin/setup`
-in `~/denteo/dental`. Cloning the Denteo repos needs an SSH key on
-git.panter.ch; without one that step is skipped with a warning.
+in `~/denteo/dental`.
 
 ### Installing something new
 

@@ -1,0 +1,28 @@
+{
+  "enabledPlugins": {
+    "slack@claude-plugins-official": true,
+    "sentry-cli@claude-plugins-official": true,
+    "tmux-claude-status@tmux-claude-status": true
+  },
+  "extraKnownMarketplaces": {
+    "tmux-claude-status": {
+      "source": {
+        "source": "directory",
+        "path": "/home/noodles/.config/tmux/plugins/tmux-claude-status"
+      }
+    }
+  },
+  "permissions": {
+    "allow": [
+      "Bash(pan.do)",
+      "Bash(script/pan.do)"
+    ],
+    "ask": [
+      "Bash(*pan.do *)"
+    ]
+  },
+  "advisorModel": "fable",
+  "awaySummaryEnabled": false,
+  "theme": "auto",
+  "editorMode": "vim"
+}

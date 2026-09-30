@@ -1,5 +1,6 @@
 [tools]
 lazygit = "latest"
 node = "lts"
+"npm:sentry" = "latest"
 tree-sitter = "latest"
 yazi = "latest"
