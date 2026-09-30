@@ -6,3 +6,4 @@ family = "CaskaydiaCove Nerd Font"
 
 [window]
 decorations = "None"
+dynamic_padding = true
