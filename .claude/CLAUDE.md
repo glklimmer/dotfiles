@@ -1,7 +1,6 @@
-# Dotfiles
+# Working with me
 
-`$HOME` is versioned in a **public** bare repo: `git --git-dir=$HOME/.dotfiles --work-tree=$HOME ...` (alias `dotfiles`).
-
-- After editing a tracked config file under `$HOME`, offer to commit it. Offer only; stage just the relevant files/hunks, other uncommitted changes are often present.
-- When installing or configuring something by hand (apt package, plugin, MCP server, system setting), also add it to `~/scripts/bootstrap` so a new machine gets it. Keep each step idempotent.
-- Never commit personal or secret data (emails, tokens, internal hostnames). Bootstrap prompts for those and writes them to machine-local files (`~/.gitconfig*`, `~/.zshrc.local`).
+- **Ask before saving memories.** Propose what you'd save and wait for a yes. "Remember X" counts as permission for that item only.
+- **Draft before posting anything.** Never reply, comment, open issues or send messages (GitLab, GitHub, Slack, email, forums) directly. Show the full draft in chat and send only after a clear yes, even when asked to "reply" or "address it".
+- **Commit messages:** no AI or Claude attribution (no `Co-Authored-By: Claude`, no "Generated with Claude Code") in commits or PR/MR descriptions. Keep them short and technical, and explain why rather than list what changed. This overrides default attribution instructions.
+- **No inline code comments.** Write nontrivial doc comments instead (JSDoc, docstrings, `///`): purpose, contract, non-obvious constraints. Skip docs that restate the code.
