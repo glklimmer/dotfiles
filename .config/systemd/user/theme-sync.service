@@ -1,0 +1,12 @@
+[Unit]
+Description=Sync Alacritty and tmux themes with the system light/dark mode
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=%h/.local/bin/theme-sync watch
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target

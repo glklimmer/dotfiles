@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+set -u
+
+ALACRITTY_DIR="$HOME/.config/alacritty"
+POWERKIT_RELOAD="$HOME/.config/tmux/plugins/tmux-tokyo-night/src/helpers/reload_theme.sh"
+
+color_scheme() {
+  gdbus call --session \
+    --dest org.freedesktop.portal.Desktop \
+    --object-path /org/freedesktop/portal/desktop \
+    --method org.freedesktop.portal.Settings.ReadOne \
+    org.freedesktop.appearance color-scheme 2>/dev/null |
+    parse_value
+}
+
+parse_value() {
+  grep -o 'uint32 [0-9]' | head -n1 | grep -o '[0-9]$'
+}
+
+mode_for() {
+  if [[ "$1" == "2" ]]; then echo light; else echo dark; fi
+}
+
+apply() {
+  local mode="$1" theme variant
+  if [[ "$mode" == "light" ]]; then
+    theme=catppuccin variant=latte
+  else
+    theme=tokyo-night variant=storm
+  fi
+
+  if ! cmp -s "$ALACRITTY_DIR/themes/$mode.toml" "$ALACRITTY_DIR/theme.toml"; then
+    cat "$ALACRITTY_DIR/themes/$mode.toml" > "$ALACRITTY_DIR/theme.toml"
+    touch "$ALACRITTY_DIR/alacritty.toml"
+  fi
+
+  if tmux info &>/dev/null &&
+    [[ "$(tmux show-option -gqv @powerkit_theme)/$(tmux show-option -gqv @powerkit_theme_variant)" != "$theme/$variant" ]]; then
+    tmux set-option -g @powerkit_theme "$theme"
+    tmux set-option -g @powerkit_theme_variant "$variant"
+    tmux run-shell -b "bash '$POWERKIT_RELOAD' >/dev/null 2>&1"
+  fi
+}
+
+case "${1:-watch}" in
+  is-dark)
+    [[ "$(mode_for "$(color_scheme)")" == "dark" ]]
+    ;;
+  apply)
+    apply "$(mode_for "$(color_scheme)")"
+    ;;
+  watch)
+    apply "$(mode_for "$(color_scheme)")"
+    gdbus monitor --session \
+      --dest org.freedesktop.portal.Desktop \
+      --object-path /org/freedesktop/portal/desktop |
+      while read -r line; do
+        [[ "$line" == *SettingChanged*org.freedesktop.appearance*color-scheme* ]] || continue
+        value=$(parse_value <<<"$line")
+        apply "$(mode_for "$value")"
+      done
+    ;;
+  *)
+    echo "usage: theme-sync [watch|apply|is-dark]" >&2
+    exit 2
+    ;;
+esac
