@@ -7,9 +7,10 @@ usage() {
   cat >&2 <<EOF
 Usage: $(basename "$0")
 
-Restore work: runs \`nt -r <repo> <branch>\` for each entry saved by sw,
-skipping branches that already have a window open. The worktrees still exist,
-so nt starts \`claude --continue\` and each window resumes its last session.
+Restore work: runs \`nt -r <repo> [-n <name>] <branch>\` for each entry saved
+by sw, skipping branches that already have a window open. The worktrees still
+exist, so nt starts \`claude --continue\` and each window resumes its last
+session.
 EOF
   exit 1
 }
@@ -26,13 +27,15 @@ if [ ! -s "$STATE_FILE" ]; then
   exit 1
 fi
 
-OPEN=$(sw -l)
+OPEN=$(sw -l | cut -d" " -f1,2)
 
-while read -r repo branch; do
+while read -r repo branch name; do
   [ -n "$branch" ] || continue
   if grep -qxF "$repo $branch" <<<"$OPEN"; then
     echo "Already open: $repo $branch"
     continue
   fi
-  nt -r "$repo" "$branch" </dev/null
+  name_opt=()
+  [ -n "$name" ] && name_opt=(-n "$name")
+  nt -r "$repo" "${name_opt[@]}" "$branch" </dev/null
 done <"$STATE_FILE"

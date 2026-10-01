@@ -10,8 +10,9 @@ usage() {
 Usage: $(basename "$0") [-s <session>] [-l]
 
 Save work: records every window of a tmux session that sits in a dental or dhc
-worktree as "<repo> <branch>" in $STATE_FILE, so rw can reopen them with nt
-later.
+worktree as "<repo> <branch> [<window-name>]" in $STATE_FILE, so rw can reopen
+them with nt later. The name is kept only for windows tmux does not
+auto-rename, i.e. ones named by nt or by hand.
 
   -s <session>  Session to read (default: the current one; works outside tmux).
   -l            Print the entries without saving them.
@@ -34,10 +35,10 @@ if [ -z "$SESSION" ] && [ -z "${TMUX:-}" ]; then
   exit 1
 fi
 
-# Prints "<repo> <branch>" for a path inside a linked worktree of a known repo.
-# The main checkouts are skipped because nt never opens windows there.
+# Prints "<repo> <branch> [<name>]" for a path inside a linked worktree of a
+# known repo. The main checkouts are skipped because nt never opens windows there.
 entry_for_path() {
-  local path="$1" common top branch repo
+  local path="$1" name="$2" common top branch repo
   common=$(git -C "$path" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 0
   top=$(git -C "$path" rev-parse --show-toplevel 2>/dev/null) || return 0
   case "$common" in
@@ -47,15 +48,17 @@ entry_for_path() {
   esac
   [ "$top" = "${common%/.git}" ] && return 0
   branch=$(git -C "$path" branch --show-current)
-  [ -n "$branch" ] && echo "$repo $branch"
+  [ -n "$branch" ] && echo "$repo $branch${name:+ $name}"
 }
 
 current_entries() {
   local target=()
   [ -n "$SESSION" ] && target=(-t "$SESSION")
-  tmux list-windows "${target[@]}" -F '#{pane_current_path}' | while read -r path; do
-    entry_for_path "$path"
-  done | awk '!seen[$0]++'
+  tmux list-windows "${target[@]}" \
+    -F '#{pane_current_path}'$'\t''#{?automatic-rename,,#{window_name}}' |
+    while IFS=$'\t' read -r path name; do
+      entry_for_path "$path" "$name"
+    done | awk '!seen[$1 " " $2]++'
 }
 
 if [ -n "$LIST_ONLY" ]; then

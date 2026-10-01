@@ -2,10 +2,11 @@
 set -euo pipefail
 
 REPO="dental"
+WINDOW_NAME=""
 
 usage() {
   cat >&2 <<EOF
-Usage: $(basename "$0") [-r dental|dhc] <branch-name> [prompt...]
+Usage: $(basename "$0") [-r dental|dhc] [-n <window-name>] <branch-name> [prompt...]
 
 Examples:
     $(basename "$0") feat/1234-add-feature
@@ -14,7 +15,8 @@ Examples:
 
 Creates (or reuses) a worktree for <branch> in the selected repo, opens a new
 tmux window in it, runs bin/setup-worktree, then starts claude once setup
-completes. Defaults to dental; -r dhc targets ~/denteo/dhc.
+completes. Defaults to dental; -r dhc targets ~/denteo/dhc. -n overrides the
+window name derived from the branch.
 
 If a prompt is given, the new claude session is seeded with it (claude
 --continue when reusing an existing worktree). For long handoffs, put the
@@ -23,9 +25,10 @@ EOF
   exit 1
 }
 
-while getopts ":r:h" opt; do
+while getopts ":r:n:h" opt; do
   case "$opt" in
     r) REPO="$OPTARG" ;;
+    n) WINDOW_NAME="$OPTARG" ;;
     h) usage ;;
     *) usage ;;
   esac
@@ -133,5 +136,6 @@ fi
 if [ "$REPO" != "dental" ]; then
   TITLE="$REPO/$TITLE"
 fi
+[ -n "$WINDOW_NAME" ] && TITLE="$WINDOW_NAME"
 tmux rename-window -t "$NEW_WIN_ID" "$TITLE"
 tmux set-window-option -t "$NEW_WIN_ID" automatic-rename off
