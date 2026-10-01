@@ -199,6 +199,16 @@ install_tridactyl_native() {
     sh -s -- "$TRIDACTYL_NATIVE_VERSION"
 }
 
+setup_tridactyl_local() {
+  step "machine-local tridactyl commands (~/.config/tridactyl/tridactylrc.local)"
+  local rc="$HOME/.config/tridactyl/tridactylrc.local"
+  [ -f "$rc" ] && return
+  local password
+  password="$(ask_secret 'Denteo dev denteo_admin password')"
+  install -m 600 /dev/null "$rc"
+  printf 'command login js -d€ -r login.js€ %s\n' "$password" >"$rc"
+}
+
 install_claude() {
   step "claude code"
   [ -x "$HOME/.local/bin/claude" ] || curl -fsSL https://claude.ai/install.sh | bash
@@ -255,6 +265,7 @@ install_neovim
 install_tmux_plugins
 install_flatpaks
 install_tridactyl_native
+setup_tridactyl_local
 install_claude
 enable_services
 setup_denteo

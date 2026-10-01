@@ -2,3 +2,6 @@ bind H tabprev
 bind L tabnext
 bind J back
 bind K forward
+
+command devenv js -r devenv.js
+source ~/.config/tridactyl/tridactylrc.local
