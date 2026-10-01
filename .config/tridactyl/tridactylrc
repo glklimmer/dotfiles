@@ -1,7 +1,15 @@
+set modeindicator false
+set editorcmd alacritty -e /opt/nvim/bin/nvim %f
+
 bind H tabprev
 bind L tabnext
 bind J back
 bind K forward
+bind e tabdetach
+bind E fillcmdline winmerge
+bind / fillcmdline find
+bind n findnext 1
+bind N findnext -1
 
 command devenv js -r devenv.js
 source ~/.config/tridactyl/tridactylrc.local
