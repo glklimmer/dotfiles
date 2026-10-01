@@ -3,4 +3,6 @@
     workspace_layout: Vertical,
     action_on_typing: r#None,
     workspace_wraparound: false,
+    focus_edge_navigation: LockedSpaces,
+    move_edge_navigation: SwitchWorkspace,
 )
