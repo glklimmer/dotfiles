@@ -7,7 +7,7 @@ saved=${NT_STATE_FILE:-$HOME/.local/state/nt/windows}
 
 if tmux has-session -t denteo 2>/dev/null &&
   [ "$(sw -s denteo -l)" != "$(cat $saved 2>/dev/null)" ] &&
-  read -q "?Save work (sw) first? [y/N] "; then
+  { read -k 1 "reply?Save work (sw) first? [Y/n] "; [[ $reply != [nN] ]] }; then
   echo
   sw -s denteo || exit
 fi
