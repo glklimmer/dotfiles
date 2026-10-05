@@ -3,6 +3,7 @@ set -u
 
 ALACRITTY_DIR="$HOME/.config/alacritty"
 POWERKIT_RELOAD="$HOME/.config/tmux/plugins/tmux-tokyo-night/src/helpers/reload_theme.sh"
+NVIM_BIN="$(command -v nvim || echo /opt/nvim/bin/nvim)"
 
 color_scheme() {
   gdbus call --session \
@@ -40,6 +41,13 @@ apply() {
     tmux set-option -g @powerkit_theme_variant "$variant"
     tmux run-shell -b "bash '$POWERKIT_RELOAD' >/dev/null 2>&1"
   fi
+
+  local socket
+  for socket in "${XDG_RUNTIME_DIR:-/run/user/$UID}"/nvim.*.0; do
+    [[ -S "$socket" ]] || continue
+    timeout 2 "$NVIM_BIN" --server "$socket" \
+      --remote-expr "v:lua.require'config.theme'.apply('$mode')" &>/dev/null
+  done
 }
 
 case "${1:-watch}" in
