@@ -1,5 +1,5 @@
 [Unit]
-Description=Sync Alacritty and tmux themes with the system light/dark mode
+Description=Sync Alacritty, tmux and Neovim themes with the system light/dark mode
 PartOf=graphical-session.target
 After=graphical-session.target
 
