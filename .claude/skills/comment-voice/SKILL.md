@@ -10,7 +10,7 @@ Much more casual than chat answers:
 - lowercase throughout, including sentence starts
 - no apostrophes in contractions: "dont", "cant", "wont"
 - terse, usually one short sentence; never essay-style
-- no markdown: no bold, mostly no backticks, code names as plain text
+- no markdown except backticks: no bold or headings, but wrap code (identifiers, snippets, file names) in backticks
 - direct, no hedging or fluff
 - intent prefixes are fine: `nit:`, `suggestion:`, `follow-up:`
 
