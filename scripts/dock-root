@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+#
+# Root half of `dock` on the laptop, installed root-owned to
+# /usr/local/sbin/dock-root and allowed via a NOPASSWD sudoers rule.
+# Every argument is validated, because sudo lets the unprivileged user call it.
+#
+#   monitors on|off        Fake two outputs for cosmic-comp: HDMI-A-1 is forced
+#                          connected with a 1080p EDID, and a configfs vkms
+#                          instance gets its connector hot-plugged. Both are
+#                          runtime-only and gone after a reboot.
+#   wifi-powersave on|off  Wi-Fi power saving delays every packet by up to
+#                          ~200 ms, which makes USB/IP and audio stutter.
+#   usb attach <busid>...  Attach PC devices through the SSH-forwarded usbipd.
+#   usb detach             Detach every device attached from that usbipd.
+set -euo pipefail
+
+HDMI="HDMI-A-1"
+USBIP_PORT=13240
+VKMS=/sys/kernel/config/vkms/dock
+EDID=00ffffffffffff000472e600000000003113010380301b78ca3585a656489a24125054bfef80714f8140818081c081009500b300d1c0023a801871382d40582c4500dd0c1100001a000000fd00384c1f5311000a202020202020000000fc005032323548510a202020202020000000fe0070632d73686172650a202020200020
+
+die() { echo "dock-root: $*" >&2; exit 1; }
+
+##
+# Runs a command silently, showing its output only when it fails; usbip and
+# usbipd log routine progress as "info" lines.
+quiet() {
+  local out
+  out=$("$@" 2>&1) || { echo "$out" >&2; return 1; }
+}
+
+##
+# The xe/i915 debugfs directory of a DRM connector, mounting debugfs if needed.
+connector_debugfs() {
+  mountpoint -q /sys/kernel/debug || mount -t debugfs none /sys/kernel/debug
+  local d
+  for d in /sys/kernel/debug/dri/*/"$1"; do
+    [ -e "$d/edid_override" ] && { echo "$d"; return; }
+  done
+  die "no debugfs directory for $1"
+}
+
+connector_sysfs() {
+  local c
+  for c in /sys/class/drm/card*-"$1"; do
+    [ -e "$c/status" ] && { echo "$c"; return; }
+  done
+  die "no sysfs connector $1"
+}
+
+##
+# Creates the vkms instance once per boot. Loading vkms without its default
+# device matters: that one cannot be unplugged without unloading the module,
+# which cosmic-comp prevents by holding it open.
+vkms_instance() {
+  [ -d "$VKMS" ] && return
+  modprobe vkms create_default_dev=0
+  mountpoint -q /sys/kernel/config || mount -t configfs none /sys/kernel/config
+  mkdir "$VKMS" "$VKMS/planes/plane0" "$VKMS/crtcs/crtc0" "$VKMS/encoders/encoder0" "$VKMS/connectors/connector0"
+  echo 1 >"$VKMS/planes/plane0/type"
+  ln -s "$VKMS/crtcs/crtc0" "$VKMS/planes/plane0/possible_crtcs"
+  ln -s "$VKMS/crtcs/crtc0" "$VKMS/encoders/encoder0/possible_crtcs"
+  ln -s "$VKMS/encoders/encoder0" "$VKMS/connectors/connector0/possible_encoders"
+  echo 2 >"$VKMS/connectors/connector0/status"
+  echo 1 >"$VKMS/enabled"
+}
+
+monitors() {
+  local debugfs sysfs
+  debugfs=$(connector_debugfs "$HDMI")
+  sysfs=$(connector_sysfs "$HDMI")
+  case "${1:-}" in
+    on)
+      echo "$EDID" | xxd -r -p >"$debugfs/edid_override"
+      echo on >"$sysfs/status"
+      vkms_instance
+      echo 1 >"$VKMS/connectors/connector0/status"
+      ;;
+    off)
+      [ -d "$VKMS" ] && echo 2 >"$VKMS/connectors/connector0/status"
+      printf reset >"$debugfs/edid_override"
+      echo detect >"$sysfs/status"
+      ;;
+    *) die "monitors on|off" ;;
+  esac
+}
+
+wifi_powersave() {
+  [[ "$1" =~ ^(on|off)$ ]] || die "wifi-powersave on|off"
+  local iface
+  for iface in $(iw dev | awk '$1 == "Interface" { print $2 }'); do
+    iw dev "$iface" set power_save "$1"
+  done
+}
+
+##
+# Pop's linux-tools only ship usbip for installed kernel versions, so after a
+# kernel update /usr/bin/usbip may refuse to run. The userspace tool does not
+# depend on the kernel version, so any installed copy works.
+usbip_bin() {
+  if usbip version &>/dev/null; then
+    echo usbip
+  else
+    ls -1v /usr/lib/linux-tools/*/usbip 2>/dev/null | tail -1 | grep . || die "usbip not installed"
+  fi
+}
+
+usb() {
+  local usbip
+  usbip=$(usbip_bin)
+  case "${1:-}" in
+    attach)
+      shift
+      modprobe vhci-hcd
+      local busid
+      for busid in "$@"; do
+        [[ "$busid" =~ ^[0-9]+-[0-9]+(\.[0-9]+)*$ ]] || die "invalid busid $busid"
+        quiet "$usbip" --tcp-port "$USBIP_PORT" attach -r 127.0.0.1 -b "$busid"
+      done
+      ;;
+    detach)
+      local port
+      for port in $("$usbip" port 2>/dev/null | awk -v url="usbip://127.0.0.1:$USBIP_PORT/" '
+        /^Port [0-9]+:/ { port = $2 + 0 }
+        index($0, url) { print port }'); do
+        quiet "$usbip" detach -p "$port"
+      done
+      ;;
+    *) die "usb attach <busid>...|detach" ;;
+  esac
+}
+
+case "${1:-}" in
+  monitors) monitors "${2:-}" ;;
+  wifi-powersave) wifi_powersave "${2:-}" ;;
+  usb) shift; usb "$@" ;;
+  *) die "usage: monitors on|off | wifi-powersave on|off | usb attach <busid>...|detach" ;;
+esac

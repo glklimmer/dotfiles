@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+#
+# Root half of `dock` on the PC, installed root-owned to /usr/local/sbin/dock-usb
+# and allowed via a NOPASSWD sudoers rule. Every argument is validated, because
+# sudo lets the unprivileged user call it.
+#
+#   start <vid:pid>...  Export these USB devices over usbipd (they disappear from
+#                       the PC) and print their bus IDs. usbipd cannot bind to
+#                       localhost and has no authentication, so a firewall rule
+#                       keeps it reachable only through the laptop's SSH tunnel.
+#   stop                Hand every exported device back to the PC.
+#
+# Wi-Fi power saving is deliberately left alone: the PC's QCA6174 (ath10k)
+# firmware times out when it is toggled at runtime and drops off the network.
+# It is disabled permanently through NetworkManager instead (see bootstrap).
+set -euo pipefail
+
+PORT=3240
+FIREWALL=(INPUT -p tcp --dport "$PORT" ! -i lo -j DROP)
+
+die() { echo "dock-usb: $*" >&2; exit 1; }
+
+##
+# Runs a command silently, showing its output only when it fails; usbip and
+# usbipd log routine progress as "info" lines.
+quiet() {
+  local out
+  out=$("$@" 2>&1) || { echo "$out" >&2; return 1; }
+}
+
+##
+# Pop's linux-tools only ship usbip for installed kernel versions, so after a
+# kernel update /usr/bin/usbip may refuse to run. The userspace tools do not
+# depend on the kernel version, so any installed copy works. Only --version
+# is safe as a probe: usbipd ignores unknown arguments and starts serving.
+tool() {
+  if "$1" --version &>/dev/null; then
+    echo "$1"
+  else
+    ls -1v /usr/lib/linux-tools/*/"$1" 2>/dev/null | tail -1 | grep . || die "$1 not installed"
+  fi
+}
+
+busid_of() {
+  local dev
+  for dev in /sys/bus/usb/devices/*; do
+    [ -f "$dev/idVendor" ] || continue
+    if [ "$(cat "$dev/idVendor"):$(cat "$dev/idProduct")" = "$1" ]; then
+      basename "$dev"
+      return
+    fi
+  done
+  die "no USB device $1"
+}
+
+start() {
+  local id busid usbip
+  for id in "$@"; do
+    [[ "$id" =~ ^[0-9a-f]{4}:[0-9a-f]{4}$ ]] || die "invalid vid:pid $id"
+  done
+  usbip=$(tool usbip)
+  modprobe usbip-host
+  iptables -C "${FIREWALL[@]}" 2>/dev/null || iptables -I "${FIREWALL[@]}"
+  pgrep -x usbipd >/dev/null || quiet "$(tool usbipd)" -D -4 --tcp-port "$PORT"
+  for id in "$@"; do
+    busid=$(busid_of "$id")
+    [ -e "/sys/bus/usb/drivers/usbip-host/$busid" ] || quiet "$usbip" bind -b "$busid"
+    echo "$busid"
+  done
+}
+
+stop() {
+  local dev usbip
+  usbip=$(tool usbip)
+  for dev in /sys/bus/usb/drivers/usbip-host/*-*; do
+    [ -e "$dev" ] && quiet "$usbip" unbind -b "$(basename "$dev")"
+  done
+  pkill -x usbipd || true
+  iptables -D "${FIREWALL[@]}" 2>/dev/null || true
+}
+
+case "${1:-}" in
+  start) shift; start "$@" ;;
+  stop) stop ;;
+  *) die "usage: start <vid:pid>... | stop" ;;
+esac
