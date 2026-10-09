@@ -27,6 +27,19 @@ APT_PACKAGES=(
   postgresql postgresql-16-pgvector libpq-dev libvips libicu-dev libyaml-dev qpdf qrencode ffmpeg dcmtk
 )
 
+DOCK_APT_PACKAGES=(
+  iw xxd
+  # wayvnc build deps
+  meson ninja-build libpixman-1-dev libdrm-dev libgbm-dev libwayland-dev wayland-protocols
+  libjansson-dev libturbojpeg0-dev libgnutls28-dev nettle-dev libgmp-dev zlib1g-dev libpam0g-dev
+)
+
+DOCK_PC_PACKAGES=(tigervnc-viewer iw linux-tools-generic)
+
+WAYVNC_VERSION=v0.10.2
+NEATVNC_VERSION=v1.0.3
+AML_VERSION=v1.0.0
+
 FLATPAKS=(com.google.Chrome com.slack.Slack com.spotify.Client)
 
 ZSH_PLUGINS=(
@@ -224,6 +237,104 @@ install_claude() {
       --executable-path "$HOME/.local/share/flatpak/exports/bin/com.google.Chrome"
 }
 
+install_wayvnc() {
+  has wayvnc && return
+  local tmp
+  tmp="$(mktemp -d)"
+  git clone -q --depth 1 --branch "$AML_VERSION" https://github.com/any1/aml.git "$tmp/aml"
+  git clone -q --depth 1 --branch "$NEATVNC_VERSION" https://github.com/any1/neatvnc.git "$tmp/neatvnc"
+  git clone -q --depth 1 --branch "$WAYVNC_VERSION" https://github.com/any1/wayvnc.git "$tmp/wayvnc"
+  mkdir -p "$tmp/wayvnc/subprojects"
+  ln -s ../../aml "$tmp/wayvnc/subprojects/aml"
+  ln -s ../../neatvnc "$tmp/wayvnc/subprojects/neatvnc"
+  meson setup "$tmp/build" "$tmp/wayvnc" --prefix=/usr/local --buildtype=release \
+    -Dman-pages=disabled -Ddefault_library=static
+  ninja -C "$tmp/build"
+  sudo ninja -C "$tmp/build" install
+  rm -rf "$tmp"
+}
+
+##
+# Shell commands that install the root helper of `dock` copied to /tmp/<name>,
+# plus the sudoers rule letting the current user run exactly that helper without
+# a password. Returned as text so the PC can run them in the same SSH session as
+# its apt install, which keeps it to one password prompt.
+root_helper_install() {
+  local name="$1"
+  local rule="%s ALL=(root) NOPASSWD: /usr/local/sbin/$name"
+  printf '%s\n' "sudo install -o root -g root -m 755 /tmp/$name /usr/local/sbin/$name" \
+    "printf '$rule\\n' \"\$USER\" >/tmp/$name.sudoers" \
+    "sudo visudo -cf /tmp/$name.sudoers" \
+    "sudo install -o root -g root -m 440 /tmp/$name.sudoers /etc/sudoers.d/$name" \
+    "rm /tmp/$name /tmp/$name.sudoers"
+}
+
+##
+# Command creating the "dock" NetworkManager connection on the machine's first
+# Ethernet port: DHCP as usual, plus a fixed address for a direct cable between
+# laptop and PC. DHCP never times out, so on the direct cable (no DHCP server)
+# the connection stays up with just the fixed address, and on any other network
+# the port works normally.
+dock_cable_connection() {
+  printf '%s' "nmcli connection add type ethernet con-name dock" \
+    " ifname \"\$(nmcli -t -f DEVICE,TYPE device | awk -F: '\$2 == \"ethernet\" { print \$1; exit }')\"" \
+    " ipv4.method auto ipv4.addresses $1 ipv4.may-fail yes ipv4.dhcp-timeout infinity ipv6.method link-local" \
+    " connection.autoconnect yes connection.autoconnect-priority 10"
+}
+
+##
+# The PC's QCA6174 (ath10k) firmware times out when Wi-Fi power saving is
+# toggled at runtime, so dock never toggles it there; it is disabled for good
+# on the active Wi-Fi connection instead (2 = disable).
+dock_wifi_powersave_off() {
+  printf '%s' "nmcli -t -f NAME,TYPE connection show --active | awk -F: '\$2 == \"802-11-wireless\" { print \$1 }'" \
+    " | while read -r c; do sudo nmcli connection modify \"\$c\" wifi.powersave 2; done"
+}
+
+dock_wifi_powersave_check() {
+  printf '%s' "! nmcli -t -f NAME,TYPE connection show --active | awk -F: '\$2 == \"802-11-wireless\" { print \$1 }'" \
+    " | while read -r c; do nmcli -g 802-11-wireless.powersave connection show \"\$c\"; done | grep -vqx disable"
+}
+
+##
+# Optional: docks this laptop to a PC over the network (see ~/scripts/dock).
+# Answering the prompt once stores DOCK_HOST in ~/.zshrc.local, so re-runs keep
+# the machine set up without asking again.
+setup_dock() {
+  step "dock (use the PC's monitors, audio, mouse and webcam over the network)"
+  local host
+  if ! grep -q '^export DOCK_HOST=' "$HOME/.zshrc.local" 2>/dev/null; then
+    [[ "$(ask 'Set up dock on this machine? [y/N]')" =~ ^[yY] ]] || return 0
+    host="$(ask 'PC to dock to, as user@host')"
+    printf '\n# dock\nexport DOCK_HOST=%s\n' "$host" >>"$HOME/.zshrc.local"
+  fi
+  host="$(sed -n 's/^export DOCK_HOST=//p' "$HOME/.zshrc.local")"
+  sudo apt-get install -y "${DOCK_APT_PACKAGES[@]}"
+  sudo apt-get install -y "linux-tools-$(uname -r)" ||
+    echo "No linux-tools for $(uname -r); dock-root falls back to another installed usbip."
+  install_wayvnc
+  if ! cmp -s "$HOME/scripts/dock-root" /usr/local/sbin/dock-root || [ ! -f /etc/sudoers.d/dock-root ]; then
+    cp "$HOME/scripts/dock-root" /tmp/dock-root
+    bash -ec "$(root_helper_install dock-root)"
+  fi
+  nmcli -t -f NAME connection show | grep -qx dock || dock_cable_connection 10.42.0.1/24 | bash -e
+  if ! ssh -o BatchMode=yes "$host" true 2>/dev/null; then
+    echo "Cannot reach $host without a password; run ssh-copy-id $host and re-run."
+    return
+  fi
+  ssh "$host" "cmp -s - /usr/local/sbin/dock-usb && test -f /etc/sudoers.d/dock-usb &&
+    nmcli -t -f NAME connection show | grep -qx dock && $(dock_wifi_powersave_check)" <"$HOME/scripts/dock-usb" && return
+  scp -q "$HOME/scripts/dock-usb" "$host:/tmp/dock-usb"
+  local remote
+  remote="set -e
+sudo apt-get install -y ${DOCK_PC_PACKAGES[*]}
+$(root_helper_install dock-usb)
+nmcli -t -f NAME connection show | grep -qx dock || sudo $(dock_cable_connection 10.42.0.2/24)
+sudo nmcli connection up dock 2>/dev/null || true
+$(dock_wifi_powersave_off)"
+  ssh -t "$host" bash -c "$(printf '%q' "$remote")"
+}
+
 enable_services() {
   step "systemd user services"
   systemctl --user daemon-reload
@@ -280,6 +391,7 @@ install_flatpaks
 install_tridactyl_native
 setup_tridactyl_local
 install_claude
+setup_dock
 enable_services
 setup_denteo
 
