@@ -10,9 +10,10 @@ plugged in here:
   - two fake outputs on the laptop, streamed with wayvnc to fullscreen VNC
     viewers on the PC's two monitors
   - the PC's speakers, headphones and microphone as laptop audio devices
-  - the PC's mouse and webcam attached over USB/IP
+  - the PC's mouse, keyboard and webcam attached over USB/IP
 
 Everything runs through one SSH connection; nothing new listens on the LAN.
+If that connection ends without "dock off", both sides undock by themselves.
 It prefers a direct Ethernet cable between laptop and PC (fixed addresses in
 10.42.0.0/24 next to DHCP, the "dock" NetworkManager connection on both) and
 falls back to Wi-Fi.
@@ -24,7 +25,7 @@ EOF
   exit 1
 }
 
-DOCK_USB=(1532:0067 046d:0893)
+DOCK_USB=(1532:0067 046d:c349 046d:0893)
 
 OUTPUTS=(HDMI-A-1 Virtual-1)
 VNC_PORTS=(5900 5901)
@@ -103,6 +104,18 @@ connect() {
 disconnect() {
   ssh -S "$SOCK" -O exit "$DOCK_HOST" 2>/dev/null || true
   [ "$(route)" != wifi ] || sudo -n dock-root wifi-powersave on || true
+}
+
+##
+# Runs `dock off` by itself once the connection to the PC ends without it, so
+# windows do not stay on fake outputs nobody can see after the PC goes away,
+# the cable is pulled or the laptop wakes up elsewhere. ServerAliveInterval
+# ends the connection about 15 s after the PC stops answering.
+watch_connection() {
+  local master
+  master=$(ssh -S "$SOCK" -O check "$DOCK_HOST" 2>&1 | grep -oP 'pid=\K[0-9]+')
+  setsid "$(readlink -f "$0")" await-disconnect "$master" >/dev/null 2>&1 </dev/null &
+  echo $! >"$STATE/watcher.pid"
 }
 
 ##
@@ -214,7 +227,10 @@ wait_for_node() {
 ##
 # The PC's onboard card can only drive the digital (speakers) or the analog
 # (headphones) output at a time in its normal profiles, so it is switched to
-# pro-audio, which exposes both. PC_RELEASE restores the previous profile.
+# pro-audio, which exposes both. Unlike the normal profiles, pro-audio leaves
+# the mixer alone, so the digital output stays muted if the analog profile was
+# active before; it is switched on explicitly. PC_RELEASE restores the previous
+# profile, which sets the mixer back to match it.
 audio_on() {
   step "audio"
   pc "$PC_CARD" <<'EOF'
@@ -226,6 +242,7 @@ pactl list short modules | grep -q 'module-native-protocol-tcp.*listen=127.0.0.1
 [ -f "$state/profile" ] ||
   pactl list cards | awk -v card="$1" '$1 == "Name:" { found = ($2 == card) } found && /Active Profile:/ { print $3; exit }' >"$state/profile"
 pactl set-card-profile "$1" pro-audio
+amixer -q -c "$(pactl list cards | awk -v card="$1" '$1 == "Name:" { found = ($2 == card) } found && $1 == "api.alsa.card" { gsub(/"/, "", $3); print $3; exit }')" sset IEC958 on
 EOF
   pactl get-default-sink >"$STATE/default-sink"
   pactl get-default-source >"$STATE/default-source"
@@ -247,7 +264,7 @@ EOF
 }
 
 usb_on() {
-  step "mouse + webcam"
+  step "mouse, keyboard + webcam"
   local busids
   mapfile -t busids < <(ssh -S "$SOCK" "$DOCK_HOST" sudo -n dock-usb start "${DOCK_USB[@]}")
   sudo -n dock-root usb attach "${busids[@]}"
@@ -258,6 +275,7 @@ on() {
   trap 'warn "docking failed; run: dock off"' ERR
   mkdir -p "$STATE"
   connect
+  watch_connection
   watchdog_on
   monitors_on
   audio_on
@@ -270,7 +288,10 @@ on() {
 # connection still leaves both machines usable. Without a connection the PC's
 # watchdog has already taken its devices back, or will once the laptop is gone.
 off() {
-  step "mouse + webcam"
+  if [ -s "$STATE/watcher.pid" ] && [ "$(cat "$STATE/watcher.pid")" != $$ ]; then
+    kill "$(cat "$STATE/watcher.pid")" 2>/dev/null || true
+  fi
+  step "mouse, keyboard + webcam"
   sudo -n dock-root usb detach || true
   step "audio"
   if [ -f "$STATE/pulse-modules" ]; then xargs -r -n1 pactl unload-module <"$STATE/pulse-modules" 2>/dev/null || true; fi
@@ -303,6 +324,10 @@ status() {
 case "${1:-}" in
   on) on ;;
   off) off ;;
+  await-disconnect)
+    while kill -0 "$2" 2>/dev/null; do sleep 2; done
+    off
+    ;;
   status) status ;;
   *) usage ;;
 esac
