@@ -1,0 +1,7 @@
+{
+    "Razer Razer Naga Trinity": (
+        state: Enabled,
+        acceleration: Some((profile: Some(Adaptive), speed: -0.3167)),
+        scroll_config: Some((method: None, natural_scroll: Some(false), scroll_button: None, scroll_factor: None)),
+    ),
+}
