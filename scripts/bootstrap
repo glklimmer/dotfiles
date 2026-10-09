@@ -297,7 +297,7 @@ dock_wifi_powersave_check() {
 }
 
 ##
-# Optional: docks this laptop to a PC over the network (see ~/scripts/dock).
+# Optional: docks this laptop to a PC over the network (see ~/scripts/dock/dock).
 # Answering the prompt once stores DOCK_HOST in ~/.zshrc.local, so re-runs keep
 # the machine set up without asking again.
 setup_dock() {
@@ -313,8 +313,8 @@ setup_dock() {
   sudo apt-get install -y "linux-tools-$(uname -r)" ||
     echo "No linux-tools for $(uname -r); dock-root falls back to another installed usbip."
   install_wayvnc
-  if ! cmp -s "$HOME/scripts/dock-root" /usr/local/sbin/dock-root || [ ! -f /etc/sudoers.d/dock-root ]; then
-    cp "$HOME/scripts/dock-root" /tmp/dock-root
+  if ! cmp -s "$HOME/scripts/dock/dock-root" /usr/local/sbin/dock-root || [ ! -f /etc/sudoers.d/dock-root ]; then
+    cp "$HOME/scripts/dock/dock-root" /tmp/dock-root
     bash -ec "$(root_helper_install dock-root)"
   fi
   nmcli -t -f NAME connection show | grep -qx dock || dock_cable_connection 10.42.0.1/24 | bash -e
@@ -323,8 +323,8 @@ setup_dock() {
     return
   fi
   ssh "$host" "cmp -s - /usr/local/sbin/dock-usb && test -f /etc/sudoers.d/dock-usb &&
-    nmcli -t -f NAME connection show | grep -qx dock && $(dock_wifi_powersave_check)" <"$HOME/scripts/dock-usb" && return
-  scp -q "$HOME/scripts/dock-usb" "$host:/tmp/dock-usb"
+    nmcli -t -f NAME connection show | grep -qx dock && $(dock_wifi_powersave_check)" <"$HOME/scripts/dock/dock-usb" && return
+  scp -q "$HOME/scripts/dock/dock-usb" "$host:/tmp/dock-usb"
   local remote
   remote="set -e
 sudo apt-get install -y ${DOCK_PC_PACKAGES[*]}

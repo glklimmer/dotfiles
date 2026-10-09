@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat >&2 <<EOF
+Usage: $(basename "$0") [clients]
+
+Replaces every other pane in the current tmux window with a warppcs test run:
+the server on the top half and <clients> clients (default 1) side by side on
+the bottom half. Run it from the warppcs checkout.
+EOF
+  exit 1
+}
+
+CLIENTS="${1:-1}"
+[[ "$CLIENTS" =~ ^[1-9]$ ]] && [ $# -le 1 ] || usage
+
+if [ -z "${TMUX:-}" ]; then
+  echo "Error: must be run inside a tmux session." >&2
+  exit 1
+fi
+
+server="$(tmux display-message -p '#{pane_id}')"
+tmux kill-pane -a -t "$server"
+tmux send-keys -t "$server" C-c 'reset' C-m
+
+clients=("$(tmux split-window -v -P -F '#{pane_id}' -t "$server")")
+for _ in $(seq 2 "$CLIENTS"); do
+  clients+=("$(tmux split-window -h -P -F '#{pane_id}' -t "${clients[-1]}")")
+done
+
+width=$(($(tmux display-message -p '#{window_width}') / CLIENTS))
+for pane in "${clients[@]::${#clients[@]}-1}"; do
+  tmux resize-pane -t "$pane" -x "$width"
+done
+
+tmux send-keys -t "$server" ' cargo run -p client -- server' C-m
+for pane in "${clients[@]}"; do
+  tmux send-keys -t "$pane" ' cargo run -p client' C-m
+done
