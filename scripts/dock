@@ -31,6 +31,7 @@ VNC_PORTS=(5900 5901)
 LAYOUT=("HDMI-A-1 0 0" "Virtual-1 1920 0" "eDP-1 1920 1080")
 
 CABLE_PC=10.42.0.2
+WATCHDOG_TIMEOUT=30
 
 PULSE_PORT=24713
 USBIP_PORT=13240
@@ -56,6 +57,21 @@ route() { cat "$STATE/route" 2>/dev/null; }
 # The PC's login shell is zsh, which does not word-split, so remote logic
 # always goes through bash.
 pc() { ssh -S "$SOCK" "$DOCK_HOST" bash -s -- "$@"; }
+
+##
+# Hands everything back to the PC: closes the viewers and the idle inhibitor,
+# restores the sound card profile, unloads the pulse server the laptop used and
+# unbinds the USB devices. Runs on the PC with the card name as $1, from both
+# `dock off` and the watchdog, and does nothing when nothing is docked.
+read -r -d '' PC_RELEASE <<'EOF' || true
+state="/run/user/$(id -u)/dock"
+[ -s "$state/watchdog.pid" ] && kill -- -"$(cat "$state/watchdog.pid")" 2>/dev/null
+[ -f "$state/viewers.pids" ] && while read -r pid; do kill -- -"$pid"; done <"$state/viewers.pids" 2>/dev/null
+[ -s "$state/profile" ] && pactl set-card-profile "$1" "$(cat "$state/profile")"
+[ -s "$state/pulse-module" ] && pactl unload-module "$(cat "$state/pulse-module")"
+rm -rf "$state"
+exec sudo -n dock-usb stop
+EOF
 
 cable_up() { ip -4 route get "$CABLE_PC" 2>/dev/null | grep -q " dev en"; }
 
@@ -87,6 +103,39 @@ connect() {
 disconnect() {
   ssh -S "$SOCK" -O exit "$DOCK_HOST" 2>/dev/null || true
   [ "$(route)" != wifi ] || sudo -n dock-root wifi-powersave on || true
+}
+
+##
+# Starts a watchdog on the PC that runs PC_RELEASE once the laptop is gone, so
+# closing the lid or pulling the cable without `dock off` does not leave the PC
+# with frozen viewers covering its monitors and no mouse. The laptop counts as
+# gone when it has not answered a ping for WATCHDOG_TIMEOUT seconds (suspended,
+# off, out of range) or when this SSH connection has ended. The ping matters
+# because sshd alone would not notice a vanished peer for many minutes. Any
+# state left by an earlier dock that never got that far is released first.
+watchdog_on() {
+  { printf 'release=%q\n' "$PC_RELEASE"; cat <<'EOF'; } | pc "$PC_CARD" "$WATCHDOG_TIMEOUT"
+set -e
+state="/run/user/$(id -u)/dock"
+bash -c "$release" _ "$1" || true
+mkdir -p "$state"
+printf '%s\n' "$release" >"$state/release"
+sshd=$$
+until [ "$(ps -o comm= -p "$sshd")" = sshd ]; do
+  sshd=$(ps -o ppid= -p "$sshd" | tr -d ' ')
+  [ "$sshd" -gt 1 ]
+done
+setsid bash -c '
+  last=$SECONDS
+  while kill -0 "$1" 2>/dev/null && [ $((SECONDS - last)) -lt "$3" ]; do
+    sleep 5
+    ping -c1 -W2 "$2" >/dev/null 2>&1 && last=$SECONDS
+  done
+  rm -f "$4/watchdog.pid"
+  exec bash "$4/release" "$5"
+' _ "$sshd" "${SSH_CLIENT%% *}" "$2" "$state" "$1" >/dev/null 2>&1 </dev/null &
+echo $! >"$state/watchdog.pid"
+EOF
 }
 
 wait_for_outputs() {
@@ -151,18 +200,6 @@ done
 EOF
 }
 
-monitors_off() {
-  step "monitors"
-  pc <<'EOF' || warn "could not close the viewers on the PC"
-state="/run/user/$(id -u)/dock"
-[ -f "$state/viewers.pids" ] && while read -r pid; do kill -- -"$pid"; done <"$state/viewers.pids" 2>/dev/null
-rm -f "$state/viewers.pids"
-EOF
-  [ -f "$STATE/wayvnc.pids" ] && xargs -r kill <"$STATE/wayvnc.pids" 2>/dev/null
-  rm -f "$STATE/wayvnc.pids"
-  sudo -n dock-root monitors off
-}
-
 ##
 # Waits until pipewire-pulse lists a node, since tunnel modules return before
 # their sink or source exists and set-default-* would fail.
@@ -177,7 +214,7 @@ wait_for_node() {
 ##
 # The PC's onboard card can only drive the digital (speakers) or the analog
 # (headphones) output at a time in its normal profiles, so it is switched to
-# pro-audio, which exposes both. The previous profile is restored on off.
+# pro-audio, which exposes both. PC_RELEASE restores the previous profile.
 audio_on() {
   step "audio"
   pc "$PC_CARD" <<'EOF'
@@ -209,20 +246,6 @@ EOF
   pactl set-default-source pc_mic
 }
 
-audio_off() {
-  step "audio"
-  [ -f "$STATE/pulse-modules" ] && xargs -r -n1 pactl unload-module <"$STATE/pulse-modules" 2>/dev/null
-  [ -f "$STATE/default-sink" ] && pactl set-default-sink "$(cat "$STATE/default-sink")"
-  [ -f "$STATE/default-source" ] && pactl set-default-source "$(cat "$STATE/default-source")"
-  rm -f "$STATE"/pulse-modules "$STATE"/default-sink "$STATE"/default-source
-  pc "$PC_CARD" <<'EOF' || warn "could not restore audio on the PC"
-state="/run/user/$(id -u)/dock"
-[ -s "$state/profile" ] && pactl set-card-profile "$1" "$(cat "$state/profile")"
-[ -s "$state/pulse-module" ] && pactl unload-module "$(cat "$state/pulse-module")"
-rm -f "$state/profile" "$state/pulse-module"
-EOF
-}
-
 usb_on() {
   step "mouse + webcam"
   local busids
@@ -230,17 +253,12 @@ usb_on() {
   sudo -n dock-root usb attach "${busids[@]}"
 }
 
-usb_off() {
-  step "mouse + webcam"
-  sudo -n dock-root usb detach
-  ssh -S "$SOCK" "$DOCK_HOST" sudo -n dock-usb stop || warn "could not return the USB devices to the PC"
-}
-
 on() {
   connected && die "already docked"
   trap 'warn "docking failed; run: dock off"' ERR
   mkdir -p "$STATE"
   connect
+  watchdog_on
   monitors_on
   audio_on
   usb_on
@@ -249,21 +267,24 @@ on() {
 
 ##
 # Undoes every step even when some fail, so a half-finished on or a dropped
-# connection still leaves both machines usable.
+# connection still leaves both machines usable. Without a connection the PC's
+# watchdog has already taken its devices back, or will once the laptop is gone.
 off() {
+  step "mouse + webcam"
+  sudo -n dock-root usb detach || true
+  step "audio"
+  if [ -f "$STATE/pulse-modules" ]; then xargs -r -n1 pactl unload-module <"$STATE/pulse-modules" 2>/dev/null || true; fi
+  if [ -f "$STATE/default-sink" ]; then pactl set-default-sink "$(cat "$STATE/default-sink")" || true; fi
+  if [ -f "$STATE/default-source" ]; then pactl set-default-source "$(cat "$STATE/default-source")" || true; fi
+  step "PC"
   if connected; then
-    usb_off || true
-    audio_off || true
-    monitors_off || true
+    pc "$PC_CARD" <<<"$PC_RELEASE" || warn "could not hand everything back to the PC"
   else
-    warn "no connection to the PC; only cleaning up the laptop"
-    sudo -n dock-root usb detach || true
-    [ -f "$STATE/pulse-modules" ] && xargs -r -n1 pactl unload-module <"$STATE/pulse-modules" 2>/dev/null
-    [ -f "$STATE/default-sink" ] && pactl set-default-sink "$(cat "$STATE/default-sink")"
-    [ -f "$STATE/default-source" ] && pactl set-default-source "$(cat "$STATE/default-source")"
-    [ -f "$STATE/wayvnc.pids" ] && xargs -r kill <"$STATE/wayvnc.pids" 2>/dev/null
-    sudo -n dock-root monitors off || true
+    warn "no connection to the PC; it takes everything back by itself ${WATCHDOG_TIMEOUT}s after losing the laptop"
   fi
+  step "monitors"
+  if [ -f "$STATE/wayvnc.pids" ]; then xargs -r kill <"$STATE/wayvnc.pids" 2>/dev/null || true; fi
+  sudo -n dock-root monitors off || true
   disconnect
   rm -rf "$STATE"
   step "undocked"
