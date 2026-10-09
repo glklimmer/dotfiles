@@ -1,17 +1,4 @@
 {
-  "enabledPlugins": {
-    "slack@claude-plugins-official": true,
-    "sentry-cli@claude-plugins-official": true,
-    "tmux-claude-status@tmux-claude-status": true
-  },
-  "extraKnownMarketplaces": {
-    "tmux-claude-status": {
-      "source": {
-        "source": "directory",
-        "path": "/home/noodles/.config/tmux/plugins/tmux-claude-status"
-      }
-    }
-  },
   "permissions": {
     "allow": [
       "Bash(pan.do)",
@@ -21,8 +8,24 @@
       "Bash(*pan.do *)"
     ]
   },
+  "enabledPlugins": {
+    "slack@claude-plugins-official": true,
+    "sentry-cli@claude-plugins-official": true,
+    "tmux-claude-status@tmux-claude-status": true,
+    "lua-lsp@claude-plugins-official": true,
+    "ruby-lsp@claude-plugins-official": true
+  },
+  "extraKnownMarketplaces": {
+    "tmux-claude-status": {
+      "source": {
+        "source": "directory",
+        "path": "/home/noodles/.config/tmux/plugins/tmux-claude-status"
+      }
+    }
+  },
   "advisorModel": "fable",
   "awaySummaryEnabled": false,
+  "autoMemoryEnabled": false,
   "theme": "auto",
   "editorMode": "vim"
 }
