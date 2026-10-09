@@ -1,0 +1,287 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat >&2 <<EOF
+Usage: $(basename "$0") on|off|status
+
+Docks this laptop to the PC over the network, as if its peripherals were
+plugged in here:
+  - two fake outputs on the laptop, streamed with wayvnc to fullscreen VNC
+    viewers on the PC's two monitors
+  - the PC's speakers, headphones and microphone as laptop audio devices
+  - the PC's mouse and webcam attached over USB/IP
+
+Everything runs through one SSH connection; nothing new listens on the LAN.
+It prefers a direct Ethernet cable between laptop and PC (fixed addresses in
+10.42.0.0/24 next to DHCP, the "dock" NetworkManager connection on both) and
+falls back to Wi-Fi.
+
+Needs DOCK_HOST (e.g. user@192.168.1.22) in ~/.zshrc.local, plus the one-time
+setup in ~/scripts/bootstrap: root helpers dock-root (laptop) and dock-usb (PC)
+and the cable connections.
+EOF
+  exit 1
+}
+
+DOCK_USB=(1532:0067 046d:0893)
+
+OUTPUTS=(HDMI-A-1 Virtual-1)
+VNC_PORTS=(5900 5901)
+LAYOUT=("HDMI-A-1 0 0" "Virtual-1 1920 0" "eDP-1 1920 1080")
+
+CABLE_PC=10.42.0.2
+
+PULSE_PORT=24713
+USBIP_PORT=13240
+
+PC_CARD=alsa_card.pci-0000_00_1f.3
+PC_SPEAKERS=alsa_output.pci-0000_00_1f.3.pro-output-1
+PC_HEADPHONES=alsa_output.pci-0000_00_1f.3.pro-output-0
+PC_MIC=alsa_input.usb-Kingston_HyperX_Quadcast_4110-00.analog-stereo
+
+STATE="${XDG_RUNTIME_DIR:-/run/user/$UID}/dock"
+SOCK="$STATE/ssh.sock"
+
+step() { printf '\033[1;34m==> %s\033[0m\n' "$*"; }
+warn() { printf '\033[1;33m%s\033[0m\n' "$*" >&2; }
+die() { echo "dock: $*" >&2; exit 1; }
+
+connected() { [ -S "$SOCK" ] && ssh -S "$SOCK" -O check "$DOCK_HOST" 2>/dev/null; }
+
+route() { cat "$STATE/route" 2>/dev/null; }
+
+##
+# Runs a bash script from stdin on the PC through the shared connection.
+# The PC's login shell is zsh, which does not word-split, so remote logic
+# always goes through bash.
+pc() { ssh -S "$SOCK" "$DOCK_HOST" bash -s -- "$@"; }
+
+cable_up() { ip -4 route get "$CABLE_PC" 2>/dev/null | grep -q " dev en"; }
+
+##
+# One master connection carries every stream: pulse and usbipd from the PC,
+# the VNC ports to the PC. It goes over the cable when possible, else Wi-Fi,
+# where power saving has to be off or every round trip can take ~200 ms.
+# HostKeyAlias checks the cable address against the key known for DOCK_HOST.
+connect() {
+  local forwards=(-L "127.0.0.1:$PULSE_PORT:127.0.0.1:4713" -L "127.0.0.1:$USBIP_PORT:127.0.0.1:3240")
+  local port
+  for port in "${VNC_PORTS[@]}"; do forwards+=(-R "$port:127.0.0.1:$port"); done
+  local ssh=(ssh -fNM -S "$SOCK" -o ExitOnForwardFailure=yes -o ServerAliveInterval=5 -o ConnectTimeout=5
+    -o HostKeyAlias="${DOCK_HOST#*@}" "${forwards[@]}")
+  if cable_up; then
+    step "connecting over the cable"
+    if "${ssh[@]}" "${DOCK_HOST%@*}@$CABLE_PC"; then
+      echo cable >"$STATE/route"
+      return
+    fi
+    warn "no answer over the cable, trying Wi-Fi"
+  fi
+  step "connecting over Wi-Fi"
+  sudo -n dock-root wifi-powersave off
+  echo wifi >"$STATE/route"
+  "${ssh[@]}" "$DOCK_HOST"
+}
+
+disconnect() {
+  ssh -S "$SOCK" -O exit "$DOCK_HOST" 2>/dev/null || true
+  [ "$(route)" != wifi ] || sudo -n dock-root wifi-powersave on || true
+}
+
+wait_for_outputs() {
+  local list output missing
+  for _ in $(seq 50); do
+    list=$(cosmic-randr list --kdl)
+    missing=0
+    for output in "${OUTPUTS[@]}"; do
+      grep -q "^output \"$output\"" <<<"$list" || missing=1
+    done
+    [ "$missing" = 0 ] && return
+    sleep 0.2
+  done
+  die "outputs ${OUTPUTS[*]} did not appear"
+}
+
+wait_for_port() {
+  for _ in $(seq 25); do
+    ss -Hltn "sport = :$1" | grep -q . && return
+    sleep 0.2
+  done
+  die "nothing listening on port $1"
+}
+
+##
+# Fake outputs on the laptop, each streamed by wayvnc to a fullscreen viewer on
+# one PC monitor. The PC gets no input from its own mouse meanwhile, so GNOME is
+# inhibited from blanking or suspending, which would cut the dock off.
+monitors_on() {
+  step "monitors"
+  sudo -n dock-root monitors on
+  wait_for_outputs
+  local output entry name x y i
+  for output in "${OUTPUTS[@]}"; do cosmic-randr mode "$output" 1920 1080; done
+  for entry in "${LAYOUT[@]}"; do
+    read -r name x y <<<"$entry"
+    cosmic-randr position "$name" "$x" "$y"
+  done
+  for i in "${!OUTPUTS[@]}"; do
+    setsid wayvnc --disable-input --render-cursor --output "${OUTPUTS[$i]}" \
+      --socket "$STATE/wayvnc-$i.sock" 127.0.0.1 "${VNC_PORTS[$i]}" \
+      >"$STATE/wayvnc-$i.log" 2>&1 </dev/null &
+    echo $! >>"$STATE/wayvnc.pids"
+  done
+  for i in "${!VNC_PORTS[@]}"; do wait_for_port "${VNC_PORTS[$i]}"; done
+  pc "${VNC_PORTS[@]}" <<'EOF'
+set -e
+state="/run/user/$(id -u)/dock"
+mkdir -p "$state"
+shell=$(pgrep -u "$USER" -x gnome-shell | head -1)
+export $(tr '\0' '\n' <"/proc/$shell/environ" | grep -E '^(DISPLAY|XAUTHORITY|WAYLAND_DISPLAY|DBUS_SESSION_BUS_ADDRESS)=')
+setsid gnome-session-inhibit --inhibit idle:suspend --reason "laptop docked" sleep infinity >/dev/null 2>&1 </dev/null &
+echo $! >>"$state/viewers.pids"
+monitor=1
+for port in "$@"; do
+  setsid vncviewer -FullScreen -FullScreenMode=Selected -FullScreenSelectedMonitors=$monitor \
+    -ViewOnly -SecurityTypes=None -AutoSelect=0 -NoJPEG -CompressLevel=1 -DotWhenNoCursor=0 \
+    "localhost::$port" >/dev/null 2>&1 </dev/null &
+  echo $! >>"$state/viewers.pids"
+  monitor=$((monitor + 1))
+done
+EOF
+}
+
+monitors_off() {
+  step "monitors"
+  pc <<'EOF' || warn "could not close the viewers on the PC"
+state="/run/user/$(id -u)/dock"
+[ -f "$state/viewers.pids" ] && while read -r pid; do kill -- -"$pid"; done <"$state/viewers.pids" 2>/dev/null
+rm -f "$state/viewers.pids"
+EOF
+  [ -f "$STATE/wayvnc.pids" ] && xargs -r kill <"$STATE/wayvnc.pids" 2>/dev/null
+  rm -f "$STATE/wayvnc.pids"
+  sudo -n dock-root monitors off
+}
+
+##
+# Waits until pipewire-pulse lists a node, since tunnel modules return before
+# their sink or source exists and set-default-* would fail.
+wait_for_node() {
+  for _ in $(seq 25); do
+    pactl list short "$1" | grep -q "	$2	" && return
+    sleep 0.2
+  done
+  die "audio $1 $2 did not appear"
+}
+
+##
+# The PC's onboard card can only drive the digital (speakers) or the analog
+# (headphones) output at a time in its normal profiles, so it is switched to
+# pro-audio, which exposes both. The previous profile is restored on off.
+audio_on() {
+  step "audio"
+  pc "$PC_CARD" <<'EOF'
+set -e
+state="/run/user/$(id -u)/dock"
+mkdir -p "$state"
+pactl list short modules | grep -q 'module-native-protocol-tcp.*listen=127.0.0.1' ||
+  pactl load-module module-native-protocol-tcp listen=127.0.0.1 port=4713 auth-anonymous=true >"$state/pulse-module"
+[ -f "$state/profile" ] ||
+  pactl list cards | awk -v card="$1" '$1 == "Name:" { found = ($2 == card) } found && /Active Profile:/ { print $3; exit }' >"$state/profile"
+pactl set-card-profile "$1" pro-audio
+EOF
+  pactl get-default-sink >"$STATE/default-sink"
+  pactl get-default-source >"$STATE/default-source"
+  local server="server=tcp:127.0.0.1:$PULSE_PORT" latency=250
+  [ "$(route)" = cable ] && latency=60
+  local awake='session.suspend-timeout-seconds=0'
+  {
+    pactl load-module module-tunnel-sink "$server" latency_msec="$latency" sink_name=pc_speakers \
+      sink="$PC_SPEAKERS" "sink_properties=\"device.description=\\\"PC - Speakers\\\" $awake\""
+    pactl load-module module-tunnel-sink "$server" latency_msec="$latency" sink_name=pc_headphones \
+      sink="$PC_HEADPHONES" "sink_properties=\"device.description=\\\"PC - Headphones\\\" $awake\""
+    pactl load-module module-tunnel-source "$server" latency_msec=100 source_name=pc_mic \
+      source="$PC_MIC" "source_properties=\"device.description=\\\"PC - Microphone\\\"\""
+  } >"$STATE/pulse-modules"
+  wait_for_node sinks pc_speakers
+  wait_for_node sources pc_mic
+  pactl set-default-sink pc_speakers
+  pactl set-default-source pc_mic
+}
+
+audio_off() {
+  step "audio"
+  [ -f "$STATE/pulse-modules" ] && xargs -r -n1 pactl unload-module <"$STATE/pulse-modules" 2>/dev/null
+  [ -f "$STATE/default-sink" ] && pactl set-default-sink "$(cat "$STATE/default-sink")"
+  [ -f "$STATE/default-source" ] && pactl set-default-source "$(cat "$STATE/default-source")"
+  rm -f "$STATE"/pulse-modules "$STATE"/default-sink "$STATE"/default-source
+  pc "$PC_CARD" <<'EOF' || warn "could not restore audio on the PC"
+state="/run/user/$(id -u)/dock"
+[ -s "$state/profile" ] && pactl set-card-profile "$1" "$(cat "$state/profile")"
+[ -s "$state/pulse-module" ] && pactl unload-module "$(cat "$state/pulse-module")"
+rm -f "$state/profile" "$state/pulse-module"
+EOF
+}
+
+usb_on() {
+  step "mouse + webcam"
+  local busids
+  mapfile -t busids < <(ssh -S "$SOCK" "$DOCK_HOST" sudo -n dock-usb start "${DOCK_USB[@]}")
+  sudo -n dock-root usb attach "${busids[@]}"
+}
+
+usb_off() {
+  step "mouse + webcam"
+  sudo -n dock-root usb detach
+  ssh -S "$SOCK" "$DOCK_HOST" sudo -n dock-usb stop || warn "could not return the USB devices to the PC"
+}
+
+on() {
+  connected && die "already docked"
+  trap 'warn "docking failed; run: dock off"' ERR
+  mkdir -p "$STATE"
+  connect
+  monitors_on
+  audio_on
+  usb_on
+  step "docked"
+}
+
+##
+# Undoes every step even when some fail, so a half-finished on or a dropped
+# connection still leaves both machines usable.
+off() {
+  if connected; then
+    usb_off || true
+    audio_off || true
+    monitors_off || true
+  else
+    warn "no connection to the PC; only cleaning up the laptop"
+    sudo -n dock-root usb detach || true
+    [ -f "$STATE/pulse-modules" ] && xargs -r -n1 pactl unload-module <"$STATE/pulse-modules" 2>/dev/null
+    [ -f "$STATE/default-sink" ] && pactl set-default-sink "$(cat "$STATE/default-sink")"
+    [ -f "$STATE/default-source" ] && pactl set-default-source "$(cat "$STATE/default-source")"
+    [ -f "$STATE/wayvnc.pids" ] && xargs -r kill <"$STATE/wayvnc.pids" 2>/dev/null
+    sudo -n dock-root monitors off || true
+  fi
+  disconnect
+  rm -rf "$STATE"
+  step "undocked"
+}
+
+status() {
+  if connected; then echo "docked to $DOCK_HOST over $(route)"; else echo "not docked"; fi
+  cosmic-randr list --kdl | grep -E '^output' | cut -d'"' -f2 | paste -sd' ' | sed 's/^/outputs: /'
+  pactl list short sinks | awk '$2 ~ /^pc_/ { print "audio:   " $2 }'
+  pactl list short sources | awk '$2 ~ /^pc_/ { print "audio:   " $2 }'
+  lsusb | grep -iE "$(printf '%s|' "${DOCK_USB[@]}" | sed 's/|$//')" | sed 's/^/usb:     /' || true
+}
+
+[ -n "${DOCK_HOST:-}" ] || die "set DOCK_HOST (e.g. user@192.168.1.22) in ~/.zshrc.local"
+
+case "${1:-}" in
+  on) on ;;
+  off) off ;;
+  status) status ;;
+  *) usage ;;
+esac
