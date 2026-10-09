@@ -12,7 +12,8 @@ Much more casual than chat answers:
 - terse, usually one short sentence; never essay-style
 - no markdown except backticks: no bold or headings, but wrap code (identifiers, snippets, file names) in backticks
 - direct, no hedging or fluff
-- intent prefixes are fine: `nit:`, `suggestion:`, `follow-up:`
+- no intent prefixes (`suggestion:`, `question:`, `nit:`); the phrasing carries the intent
+- no hypotheticals or speculative scenarios; state the point plainly
 
 Example:
 
