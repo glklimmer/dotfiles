@@ -253,6 +253,19 @@ setup_denteo() {
   fi
 }
 
+##
+# Asks for the sudo password once and keeps the credential fresh until the
+# script exits, since long steps (cargo builds, mise installs) outlast sudo's
+# 15 minute timeout and would otherwise prompt again midway.
+keep_sudo_alive() {
+  sudo -v
+  while kill -0 "$$" 2>/dev/null; do
+    sudo -n true
+    sleep 60
+  done &
+}
+
+keep_sudo_alive
 setup_git_identity
 setup_local_env
 install_apt_packages
