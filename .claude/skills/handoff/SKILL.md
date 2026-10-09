@@ -11,7 +11,7 @@ it in its own worktree.
 
 ## Local tooling prerequisite
 
-The launch step uses `nt` (`~/scripts/nt`), a personal helper: `nt <branch> [prompt...]`
+The launch step uses `nt` (`~/scripts/denteo/nt`), a personal helper: `nt <branch> [prompt...]`
 creates a worktree via `pan.do code:new`, opens a new tmux window in it, runs
 `bin/setup-worktree`, and starts a `claude` seeded with the prompt (`claude --continue`
 when reusing a worktree). Set `NT_AUTO=1` to launch that `claude` in auto-accept mode

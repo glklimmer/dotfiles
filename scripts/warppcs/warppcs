@@ -10,8 +10,8 @@ fi
 tmux rename-session 'warppcs'
 
 # Navigate to the specific folder in tmux
-cd ~/Development/rust/warppcs
-tmux send-keys ' cd ~/Development/rust/warppcs' C-m
+cd ~/development/warppcs
+tmux send-keys ' cd ~/development/warppcs' C-m
 
 # Rename the current window to "nvim"
 tmux rename-window 'nvim'
@@ -23,14 +23,14 @@ tmux send-keys ' nvim' C-m
 tmux new-window -n 'test'
 
 # Navigate to the specific folder and enter "pp" command
-tmux send-keys ' cd ~/Development/rust/warppcs' C-m
+tmux send-keys ' cd ~/development/warppcs' C-m
 tmux send-keys ' pp'
 
 # Create a new window and name it "bacon"
 tmux new-window -n 'bacon'
 
 # Navigate to the specific folder and run command
-tmux send-keys ' cd ~/Development/rust/warppcs' C-m
+tmux send-keys ' cd ~/development/warppcs' C-m
 tmux send-keys ' bacon clippy' C-m
 
 # Select the "nvim" window
