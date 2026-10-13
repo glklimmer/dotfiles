@@ -92,3 +92,11 @@ test('a bare empty line inside a hunk is a blank context line, and trailing ones
   expect(hunk!.lines.map(line => line.kind + line.text)).toEqual([' a', ' ', '-b', '+c'])
   expect(hunk!.lines[2]).toMatchObject({ oldNo: 7, newNo: 7 })
 })
+
+test('a hunk with an empty side keeps git\'s header numbers', () => {
+  const deleted = ['--- a/app/x.rb', '+++ /dev/null', '@@ -1,2 +0,0 @@', '-a', '-b', ''].join('\n')
+  const removal = ['@@ -5,2 +4,0 @@', '-a', '-b', ''].join('\n')
+
+  expect(selectChunk(parseDiff(deleted), { newStart: 1, newEnd: 1, oldStart: 1, oldEnd: 2 })?.source).toBe('@@ -1,2 +0,0 @@\n-a\n-b')
+  expect(selectChunk(parseDiff(removal), { newStart: 1, newEnd: 1, oldStart: 5, oldEnd: 6 })?.source).toBe('@@ -5,2 +4,0 @@\n-a\n-b')
+})

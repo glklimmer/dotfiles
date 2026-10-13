@@ -28,7 +28,16 @@ export type ChunkRange = {
  */
 export type Chunk = { format: 'diff' | 'source'; source: string; firstLine: number; lastLine: number }
 
-const HUNK_HEADER = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/
+const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/
+
+/**
+ * The number the hunk's first line on that side would carry. Git writes the
+ * line before for an empty side (`+4,0` follows new line 4), so the lines of
+ * such a hunk are numbered by the next one, as removed lines inside a hunk are.
+ */
+function firstNumber(start: string, count: string | undefined): number {
+  return count === '0' ? Number(start) + 1 : Number(start)
+}
 
 /**
  * Parses `git diff` output for a single file. Everything before the first
@@ -52,8 +61,8 @@ export function parseDiff(text: string): ParsedDiff {
     const header = HUNK_HEADER.exec(raw)
     if (header) {
       pendingBlanks = 0
-      oldNo = Number(header[1])
-      newNo = Number(header[2])
+      oldNo = firstNumber(header[1]!, header[2])
+      newNo = firstNumber(header[3]!, header[4])
       current = { lines: [] }
       hunks.push(current)
       continue
