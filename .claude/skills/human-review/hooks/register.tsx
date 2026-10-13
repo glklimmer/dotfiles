@@ -110,18 +110,36 @@ const RUN_BACKGROUND: Record<DiffRun['kind'], string | undefined> = {
 }
 
 /** A stored result read back: the card's title line, the code and how to draw it. */
-export type ShownCode = { title: string; format: Chunk['format']; language?: string; firstLine: number; source: string }
+export type ShownCode = { title: string; format: Chunk['format']; languages: string[]; firstLine: number; source: string }
 
-const RESULT_HEADER = / \((diff|source)(?:, ([\w+-]+))?\)$/
+const RESULT_HEADER = / \((diff|source)(?:, ([\w+ -]+))?\)$/
 
-/** The result's first line: the title, then the format and any language the highlighter is told. */
-function resultHeader(title: string, format: Chunk['format'], language: string | undefined): string {
-  return `${title} (${language ? `${format}, ${language}` : format})`
+/**
+ * The result's first line: the title, then the format and the language each
+ * hunk starts in, space-separated, or one language for them all.
+ */
+function resultHeader(title: string, format: Chunk['format'], languages: string[]): string {
+  return `${title} (${languages.length ? `${format}, ${languages.join(' ')}` : format})`
+}
+
+/**
+ * The language each hunk starts in, from the new-file line it starts at.
+ * Empty when the path decides; one entry when every hunk agrees.
+ */
+function hunkLanguages(path: string, starts: number[], file: string | undefined): string[] {
+  const languages = starts.map(line => chunkLanguage(path, line, file))
+  if (!languages.every(language => language !== undefined)) return []
+  return new Set(languages).size === 1 ? [languages[0]!] : (languages as string[])
+}
+
+/** The new-file line each hunk of a diff starts at. */
+function hunkStarts(diff: string): number[] {
+  return parseDiff(diff).hunks.map(hunk => hunk.lines[0]?.newNo ?? 1)
 }
 
 /**
  * Splits a stored result back into its title and the code under it. The first
- * line ends in `(diff)` or `(source)`, either with `, <language>` before the
+ * line ends in `(diff)` or `(source)`, either with `, <languages>` before the
  * paren; anything else (an error text) answers undefined, so the card leaves
  * the row to the engine.
  */
@@ -136,7 +154,7 @@ export function readResult(output: unknown): ShownCode | undefined {
   return {
     title: header.slice(0, match.index),
     format: match[1] as Chunk['format'],
-    language: match[2],
+    languages: match[2]?.split(' ') ?? [],
     firstLine,
     source: output.slice(newline + 1),
   }
@@ -156,7 +174,8 @@ type CardRow = { lineNumber: number; kind?: DiffRun['kind']; text: string; langu
 
 /**
  * The card's lines, one list per hunk. A `.vue` card walks its block tags, so
- * a chunk spanning `<template>` and `<script>` highlights each in its own language.
+ * a chunk spanning `<template>` and `<script>` highlights each in its own language;
+ * each hunk starts from its own language, since the tags between hunks are not drawn.
  */
 function cardRows(shown: ShownCode, path: string): CardRow[][] {
   const hunks: CardRow[][] =
@@ -165,11 +184,13 @@ function cardRows(shown: ShownCode, path: string): CardRow[][] {
       : toRuns(shown.source).map(runs =>
           runs.flatMap(run => run.text.split('\n').map((text, offset) => ({ lineNumber: run.firstLine + offset, kind: run.kind, text }))),
         )
-  if (!path.endsWith('.vue')) return hunks.map(rows => rows.map(row => ({ ...row, language: shown.language })))
+  return hunks.map((rows, index) => {
+    const initial = shown.languages[index] ?? shown.languages.at(-1)
+    if (!path.endsWith('.vue')) return rows.map(row => ({ ...row, language: initial }))
 
-  const languages = vueLineLanguages(hunks.flat().map(row => row.text), shown.language ?? 'xml')
-  let index = 0
-  return hunks.map(rows => rows.map(row => ({ ...row, language: languages[index++] })))
+    const languages = vueLineLanguages(rows.map(row => row.text), initial ?? 'xml')
+    return rows.map((row, line) => ({ ...row, language: languages[line] }))
+  })
 }
 
 /**
@@ -211,8 +232,9 @@ async function showChunk($: EngineInterface, input: ShowChunkInput) {
   }
 
   const file = await vueFile(input.path, () => $.process.run(['git', 'show', `${input.head_sha}:${input.path}`]).then(shown => shown.stdout))
-  const language = chunkLanguage(input.path, chunk.firstLine, file)
-  const header = resultHeader(`Chunk ${input.index}/~${input.total} · ${input.path} L${chunk.firstLine}–${chunk.lastLine}`, chunk.format, language)
+  const starts = chunk.format === 'source' ? [chunk.firstLine] : hunkStarts(chunk.source)
+  const languages = hunkLanguages(input.path, starts, file)
+  const header = resultHeader(`Chunk ${input.index}/~${input.total} · ${input.path} L${chunk.firstLine}–${chunk.lastLine}`, chunk.format, languages)
   return { result: `${header}\n${chunk.source}` }
 }
 
@@ -228,9 +250,8 @@ async function showProposal($: EngineInterface, input: ShowProposalInput) {
   if (diff.hunks.length === 0) {
     return { deny: 'The diff has no hunk: start each hunk with a header like `@@ -12,3 +12,4 @@` holding the real line numbers.' }
   }
-  const firstLine = diff.hunks[0]!.lines[0]?.newNo ?? 1
   const file = await vueFile(input.path, () => $.fs.read(input.path) as Promise<string>)
-  const header = resultHeader(`Proposed change · ${input.path}`, 'diff', chunkLanguage(input.path, firstLine, file))
+  const header = resultHeader(`Proposed change · ${input.path}`, 'diff', hunkLanguages(input.path, hunkStarts(input.diff), file))
   return { result: `${header}\n${input.diff}` }
 }
 
@@ -260,7 +281,7 @@ export const register: Register = on => {
       const width = gutterWidth(hunks)
       const code =
         shown.format === 'source' && !input.path.endsWith('.vue') ? (
-          <Code source={shown.source} path={input.path} startLine={shown.firstLine} {...languageProp(shown.language)} />
+          <Code source={shown.source} path={input.path} startLine={shown.firstLine} {...languageProp(shown.languages[0])} />
         ) : (
           hunks.map((rows, index) => (
             <Box flexDirection="column">

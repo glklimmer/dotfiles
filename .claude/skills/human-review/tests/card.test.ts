@@ -104,3 +104,13 @@ test('a new .vue file highlights each block in its own language', async $ => {
   expect(await ui.find({ type: 'Text', text: '5 ' })).toBeDefined()
   await ui.unmount()
 })
+
+test('each hunk of a .vue card starts in its own language', async $ => {
+  const output = 'Chunk 3/~12 · app/x.vue L2–21 (diff, xml scss)\n@@ -2,1 +2,1 @@\n-<div />\n+<span />\n@@ -20,1 +20,1 @@\n-.a { b: c }\n+.a { b: d }'
+  const card = toolUse(output)
+  const ui = await $.ui.mount({ surface: 'terminal', ...card, props: { ...card.props, input: { ...INPUT, path: 'app/x.vue' } } })
+
+  const languages = (await ui.findAll({ type: 'Code' })).map(code => code.props.language)
+  expect(languages).toEqual(['xml', 'xml', 'scss', 'scss'])
+  await ui.unmount()
+})
