@@ -9,7 +9,7 @@ const INPUT = {
   new_start: 10,
   new_end: 16,
   summary: 'Renames the scope.',
-  findings: [{ severity: 'major', line: 13, text: 'unused variable' }],
+  findings: [{ severity: 'major', line: 13, title: 'Dead code', text: 'unused variable' }],
 }
 
 const OUTPUT = 'Chunk 3/~12 · app/x.rb L10–11 (diff)\n@@ -10,2 +10,2 @@\n-old\n+new\n a'
@@ -40,6 +40,8 @@ test('the card draws each diff run as highlighted code beside its numbered gutte
     expect(await ui.find({ type: 'Text', text: '11   ' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: 'Chunk 3/~12 · app/x.rb L10–11' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /unused variable/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /3\.1/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Dead code/ })).toBeDefined()
     await ui.unmount()
   }
 })

@@ -3,13 +3,19 @@ import type { EngineInterface, Register } from 'claude-code'
 import { parseDiff, selectChunk, toRuns } from './chunk'
 import type { Chunk, DiffRun } from './chunk'
 
+/** Numbers a finding `<chunk>.<n>`, or just `<n>` on a card without a chunk index, so the reviewer can refer to it. */
+function findingNumber(chunkIndex: number | undefined, position: number): string {
+  const number = position + 1
+  return chunkIndex ? `${chunkIndex}.${number}` : `${number}`
+}
+
 /** The model-facing names of the tools: `mcp__<plugin>__<name>`. */
 export const CHUNK_TOOL = 'mcp__human-review__show_chunk'
 export const PROPOSAL_TOOL = 'mcp__human-review__show_proposal'
 
 const SHA = /^[0-9a-f]{7,40}$/
 
-export type Finding = { severity: string; line?: number; text: string }
+export type Finding = { severity: string; line?: number; title?: string; text: string }
 
 /** What the model sends for a chunk: where it is, never the code itself. */
 export type ShowChunkInput = {
@@ -34,7 +40,7 @@ export type ShowProposalInput = {
 }
 
 /** What both cards read from the call's input. */
-type CardInput = { path: string; summary?: string; findings?: Finding[] }
+type CardInput = { path: string; index?: number; summary?: string; findings?: Finding[] }
 
 const CHUNK_SCHEMA = {
   type: 'object',
@@ -51,13 +57,14 @@ const CHUNK_SCHEMA = {
     summary: { type: 'string', description: 'One or two sentences: what the change does, how it relates to other chunks, callers and domain terms.' },
     findings: {
       type: 'array',
-      description: 'Verified quality findings for this chunk.',
+      description: 'Verified quality findings for this chunk. Each is shown numbered `<chunk>.<n>` so the reviewer can refer to it.',
       items: {
         type: 'object',
         properties: {
           severity: { type: 'string' },
           line: { type: 'integer' },
-          text: { type: 'string' },
+          title: { type: 'string', description: 'The problem in a few words, shown as the heading.' },
+          text: { type: 'string', description: 'Problem and remedy, shown indented under the heading.' },
         },
         required: ['severity', 'text'],
       },
@@ -222,12 +229,25 @@ export const register: Register = on => {
           <Text bold>{shown.title}</Text>
           {input.summary ? <Text>{input.summary}</Text> : null}
           {code}
-          {(input.findings ?? []).map(finding => (
-            <Text color="warning">
-              {finding.severity}
-              {finding.line ? ` L${finding.line}` : ''}: {finding.text}
-            </Text>
-          ))}
+          {input.findings?.length ? (
+            <Box flexDirection="column" marginTop={1}>
+              {input.findings.map((finding, number) => (
+                <Box flexDirection="column">
+                  <Text>
+                    <Text bold>{findingNumber(input.index, number)} </Text>
+                    <Text bold color="warning">
+                      {finding.severity}
+                      {finding.line ? ` L${finding.line}` : ''}
+                    </Text>
+                    {finding.title ? <Text bold> · {finding.title}</Text> : null}
+                  </Text>
+                  <Box marginLeft={2}>
+                    <Text>{finding.text}</Text>
+                  </Box>
+                </Box>
+              ))}
+            </Box>
+          ) : null}
         </Box>
       )
     })
