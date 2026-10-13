@@ -85,3 +85,10 @@ test('runs number removed lines in the old file and the rest in the new one', ()
     ],
   ])
 })
+
+test('a bare empty line inside a hunk is a blank context line, and trailing ones are dropped', () => {
+  const [hunk] = parseDiff('@@ -5,3 +5,3 @@\n a\n\n-b\n+c\n\n\n').hunks
+
+  expect(hunk!.lines.map(line => line.kind + line.text)).toEqual([' a', ' ', '-b', '+c'])
+  expect(hunk!.lines[2]).toMatchObject({ oldNo: 7, newNo: 7 })
+})

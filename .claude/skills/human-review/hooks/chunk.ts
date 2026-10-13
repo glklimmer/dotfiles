@@ -34,8 +34,11 @@ const HUNK_HEADER = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/
  * Parses `git diff` output for a single file. Everything before the first
  * hunk header (`diff --git`, `index`, `---`/`+++`) is read for the new-file
  * marker and otherwise dropped, since the `Code` element only parses hunks.
- * Lines that are neither context, addition nor removal (`\ No newline at end
- * of file`, the empty string after the final newline) are skipped.
+ * A bare empty line inside a hunk is a blank context line whose leading space
+ * was lost (hand-written proposals, trimmed editors); empty lines that end a
+ * hunk, like the one after the final newline, are dropped. Other lines that
+ * are neither context, addition nor removal (`\ No newline at end of file`)
+ * are skipped.
  */
 export function parseDiff(text: string): ParsedDiff {
   const hunks: Hunk[] = []
@@ -43,10 +46,12 @@ export function parseDiff(text: string): ParsedDiff {
   let current: Hunk | undefined
   let oldNo = 0
   let newNo = 0
+  let pendingBlanks = 0
 
   for (const raw of text.split('\n')) {
     const header = HUNK_HEADER.exec(raw)
     if (header) {
+      pendingBlanks = 0
       oldNo = Number(header[1])
       newNo = Number(header[2])
       current = { lines: [] }
@@ -57,7 +62,18 @@ export function parseDiff(text: string): ParsedDiff {
       if (raw.startsWith('--- /dev/null') || raw.startsWith('new file mode')) isNewFile = true
       continue
     }
+    if (raw === '') {
+      pendingBlanks++
+      continue
+    }
     const kind = raw[0]
+    if (kind === ' ' || kind === '+' || kind === '-') {
+      for (; pendingBlanks > 0; pendingBlanks--) {
+        current.lines.push({ kind: ' ', text: '', oldNo, newNo })
+        oldNo++
+        newNo++
+      }
+    }
     if (kind === ' ') {
       current.lines.push({ kind: ' ', text: raw.slice(1), oldNo, newNo })
       oldNo++
