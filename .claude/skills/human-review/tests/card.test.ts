@@ -73,3 +73,14 @@ test('a proposed change draws like a chunk, numbered from its hunk header', asyn
   expect(await ui.find({ type: 'Text', text: '40 + ' })).toBeDefined()
   await ui.unmount()
 })
+
+test('every diff line gets its own row, so blank lines keep their number', async $ => {
+  const output = 'Chunk 3/~12 · app/x.rb L10–12 (diff)\n@@ -9,0 +10,3 @@\n+a\n+\n+b'
+  const ui = await $.ui.mount({ surface: 'terminal', ...toolUse(output) })
+
+  const sources = (await ui.findAll({ type: 'Code' })).map(code => code.props.source)
+  expect(sources).toEqual(['a', '', 'b'])
+  expect(await ui.find({ type: 'Text', text: '11 + ' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '12 + ' })).toBeDefined()
+  await ui.unmount()
+})

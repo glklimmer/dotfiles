@@ -133,14 +133,12 @@ function isCardInput(value: unknown): value is CardInput {
 }
 
 /**
- * The run's line numbers and markers, padded to one width for the whole card:
- * each `Code` would otherwise size its own gutter and the runs would not line up.
+ * One line's number and marker, padded to one width for the whole card. Each
+ * line is its own row beside its own `Code`: a gutter spanning a multi-line
+ * `Code` drifts, since `Code` draws no row for an empty line and wraps long ones.
  */
-function gutter(run: DiffRun, width: number): string {
-  return run.text
-    .split('\n')
-    .map((_, offset) => `${String(run.firstLine + offset).padStart(width)} ${run.kind}`)
-    .join('\n')
+function gutter(lineNumber: number, kind: DiffRun['kind'], width: number): string {
+  return `${String(lineNumber).padStart(width)} ${kind}`
 }
 
 function gutterWidth(hunks: DiffRun[][]): number {
@@ -212,14 +210,16 @@ export const register: Register = on => {
           toRuns(shown.source).map((runs, index, hunks) => (
             <Box flexDirection="column">
               {index > 0 ? <Text dimColor>⋯</Text> : null}
-              {runs.map(run => (
-                <Box flexDirection="row" backgroundColor={RUN_BACKGROUND[run.kind]}>
-                  <Text dimColor>{gutter(run, gutterWidth(hunks))} </Text>
-                  <Box flexGrow={1}>
-                    <Code source={run.text} path={input.path} />
+              {runs.flatMap(run =>
+                run.text.split('\n').map((text, offset) => (
+                  <Box flexDirection="row" backgroundColor={RUN_BACKGROUND[run.kind]}>
+                    <Text dimColor>{gutter(run.firstLine + offset, run.kind, gutterWidth(hunks))} </Text>
+                    <Box flexGrow={1}>
+                      <Code source={text} path={input.path} />
+                    </Box>
                   </Box>
-                </Box>
-              ))}
+                )),
+              )}
             </Box>
           ))
         )
@@ -228,7 +228,9 @@ export const register: Register = on => {
         <Box flexDirection="column" marginTop={1} marginLeft={2}>
           <Text bold>{shown.title}</Text>
           {input.summary ? <Text>{input.summary}</Text> : null}
-          {code}
+          <Box flexDirection="column" marginTop={1}>
+            {code}
+          </Box>
           {input.findings?.length ? (
             <Box flexDirection="column" marginTop={1}>
               {input.findings.map((finding, number) => (
