@@ -84,3 +84,12 @@ test('every diff line gets its own row, so blank lines keep their number', async
   expect(await ui.find({ type: 'Text', text: '12 + ' })).toBeDefined()
   await ui.unmount()
 })
+
+test('a language in the result header reaches the highlighter', async $ => {
+  const output = 'Chunk 3/~12 · app/x.vue L10–11 (diff, typescript)\n@@ -10,2 +10,2 @@\n-old\n+new\n a'
+  const ui = await $.ui.mount({ surface: 'terminal', ...toolUse(output) })
+
+  expect((await ui.find({ type: 'Code' }))?.props.language).toBe('typescript')
+  expect(await ui.find({ type: 'Text', text: 'Chunk 3/~12 · app/x.vue L10–11' })).toBeDefined()
+  await ui.unmount()
+})

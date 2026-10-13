@@ -1,6 +1,6 @@
 import type { EngineInterface, Register } from 'claude-code'
 
-import { parseDiff, selectChunk, toRuns } from './chunk'
+import { chunkLanguage, parseDiff, selectChunk, toRuns } from './chunk'
 import type { Chunk, DiffRun } from './chunk'
 
 /** Numbers a finding `<chunk>.<n>`, or just `<n>` on a card without a chunk index, so the reviewer can refer to it. */
@@ -110,22 +110,41 @@ const RUN_BACKGROUND: Record<DiffRun['kind'], string | undefined> = {
 }
 
 /** A stored result read back: the card's title line, the code and how to draw it. */
-export type ShownCode = { title: string; format: Chunk['format']; firstLine: number; source: string }
+export type ShownCode = { title: string; format: Chunk['format']; language?: string; firstLine: number; source: string }
+
+const RESULT_HEADER = / \((diff|source)(?:, ([\w+-]+))?\)$/
+
+/** The result's first line: the title, then the format and any language the highlighter is told. */
+function resultHeader(title: string, format: Chunk['format'], language: string | undefined): string {
+  return `${title} (${language ? `${format}, ${language}` : format})`
+}
 
 /**
  * Splits a stored result back into its title and the code under it. The first
- * line ends in `(diff)` or `(source)`; anything else (an error text) answers
- * undefined, so the card leaves the row to the engine.
+ * line ends in `(diff)` or `(source)`, either with `, <language>` before the
+ * paren; anything else (an error text) answers undefined, so the card leaves
+ * the row to the engine.
  */
 export function readResult(output: unknown): ShownCode | undefined {
   if (typeof output !== 'string') return undefined
   const newline = output.indexOf('\n')
   if (newline < 0) return undefined
   const header = output.slice(0, newline)
-  const format = header.endsWith('(diff)') ? 'diff' : header.endsWith('(source)') ? 'source' : undefined
-  if (!format) return undefined
+  const match = RESULT_HEADER.exec(header)
+  if (!match) return undefined
   const firstLine = Number(/ L(\d+)–/.exec(header)?.[1] ?? 1)
-  return { title: header.replace(/ \((diff|source)\)$/, ''), format, firstLine, source: output.slice(newline + 1) }
+  return {
+    title: header.slice(0, match.index),
+    format: match[1] as Chunk['format'],
+    language: match[2],
+    firstLine,
+    source: output.slice(newline + 1),
+  }
+}
+
+/** `language` only when one was decided: a prop left undefined can make the engine refuse the tree. */
+function languageProp(shown: ShownCode): { language?: string } {
+  return shown.language ? { language: shown.language } : {}
 }
 
 function isCardInput(value: unknown): value is CardInput {
@@ -170,15 +189,28 @@ async function showChunk($: EngineInterface, input: ShowChunkInput) {
     return { deny: `No changed lines of ${input.path} fall in new L${input.new_start}–${input.new_end}. Check the range against the diff.` }
   }
 
-  const header = `Chunk ${input.index}/~${input.total} · ${input.path} L${chunk.firstLine}–${chunk.lastLine} (${chunk.format})`
+  const file = await vueFile(input.path, () => $.process.run(['git', 'show', `${input.head_sha}:${input.path}`]).then(shown => shown.stdout))
+  const language = chunkLanguage(input.path, chunk.firstLine, file)
+  const header = resultHeader(`Chunk ${input.index}/~${input.total} · ${input.path} L${chunk.firstLine}–${chunk.lastLine}`, chunk.format, language)
   return { result: `${header}\n${chunk.source}` }
 }
 
-function showProposal(input: ShowProposalInput) {
-  if (parseDiff(input.diff).hunks.length === 0) {
+/** A `.vue` file's text, so its blocks can be told apart; undefined for other files or when it cannot be read. */
+async function vueFile(path: string, read: () => Promise<string>): Promise<string | undefined> {
+  if (!path.endsWith('.vue')) return undefined
+  return read().catch(() => undefined)
+}
+
+/** Proposals carry no SHA, so a `.vue` file's blocks are read from the working tree. */
+async function showProposal($: EngineInterface, input: ShowProposalInput) {
+  const diff = parseDiff(input.diff)
+  if (diff.hunks.length === 0) {
     return { deny: 'The diff has no hunk: start each hunk with a header like `@@ -12,3 +12,4 @@` holding the real line numbers.' }
   }
-  return { result: `Proposed change · ${input.path} (diff)\n${input.diff}` }
+  const firstLine = diff.hunks[0]!.lines[0]?.newNo ?? 1
+  const file = await vueFile(input.path, () => $.fs.read(input.path) as Promise<string>)
+  const header = resultHeader(`Proposed change · ${input.path}`, 'diff', chunkLanguage(input.path, firstLine, file))
+  return { result: `${header}\n${input.diff}` }
 }
 
 export const register: Register = on => {
@@ -192,7 +224,7 @@ export const register: Register = on => {
     deny: 'show_chunk failed. Fall back to fenced code blocks.',
   }))
 
-  on('tool.call', { tool: PROPOSAL_TOOL }, ($, e) => showProposal(e as unknown as ShowProposalInput)).catch(() => ({
+  on('tool.call', { tool: PROPOSAL_TOOL }, ($, e) => showProposal($, e as unknown as ShowProposalInput)).catch(() => ({
     deny: 'show_proposal failed. Fall back to a ```diff block.',
   }))
 
@@ -205,7 +237,7 @@ export const register: Register = on => {
       const { Box, Text, Code } = $.ui.resolve(e)
       const code =
         shown.format === 'source' ? (
-          <Code source={shown.source} path={input.path} startLine={shown.firstLine} />
+          <Code source={shown.source} path={input.path} startLine={shown.firstLine} {...languageProp(shown)} />
         ) : (
           toRuns(shown.source).map((runs, index, hunks) => (
             <Box flexDirection="column">
@@ -215,7 +247,7 @@ export const register: Register = on => {
                   <Box flexDirection="row" backgroundColor={RUN_BACKGROUND[run.kind]}>
                     <Text dimColor>{gutter(run.firstLine + offset, run.kind, gutterWidth(hunks))} </Text>
                     <Box flexGrow={1}>
-                      <Code source={text} path={input.path} />
+                      <Code source={text} path={input.path} {...languageProp(shown)} />
                     </Box>
                   </Box>
                 )),

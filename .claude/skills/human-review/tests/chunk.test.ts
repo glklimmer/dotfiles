@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { parseDiff, selectChunk, toRuns } from '../hooks/chunk'
+import { chunkLanguage, parseDiff, selectChunk, toRuns } from '../hooks/chunk'
 
 const MODIFIED = [
   'diff --git a/app/x.rb b/app/x.rb',
@@ -99,4 +99,18 @@ test('a hunk with an empty side keeps git\'s header numbers', () => {
 
   expect(selectChunk(parseDiff(deleted), { newStart: 1, newEnd: 1, oldStart: 1, oldEnd: 2 })?.source).toBe('@@ -1,2 +0,0 @@\n-a\n-b')
   expect(selectChunk(parseDiff(removal), { newStart: 1, newEnd: 1, oldStart: 5, oldEnd: 6 })?.source).toBe('@@ -5,2 +4,0 @@\n-a\n-b')
+})
+
+test('a .vue chunk is highlighted in the language of the block it sits in', () => {
+  const file = ['<template>', '  <div />', '</template>', '', '<script setup lang="ts">', 'const a = 1', '</script>', '', '<style lang="scss" scoped>', '.a { b: c }', '</style>'].join('\n')
+
+  expect(chunkLanguage('app/x.vue', 2, file)).toBe('html')
+  expect(chunkLanguage('app/x.vue', 5, file)).toBe('html')
+  expect(chunkLanguage('app/x.vue', 6, file)).toBe('typescript')
+  expect(chunkLanguage('app/x.vue', 10, file)).toBe('scss')
+})
+
+test('rust is named outright and other files are left to the path', () => {
+  expect(chunkLanguage('src/lib.rs', 1)).toBe('rust')
+  expect(chunkLanguage('app/x.rb', 1)).toBeUndefined()
 })

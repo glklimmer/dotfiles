@@ -197,3 +197,41 @@ export function toRuns(diffSource: string): DiffRun[][] {
     return runs
   })
 }
+
+/** Languages the highlighter is told outright, where inferring from the path falls short. */
+const LANGUAGE_BY_EXTENSION: Record<string, string> = { rs: 'rust' }
+
+/**
+ * The language of the `.vue` block holding `line` (1-based): `<script>` as
+ * TypeScript or JavaScript by its `lang`, `<style>` as its `lang` or CSS, and
+ * the template and the block tags themselves as HTML. Each line is highlighted
+ * on its own, so it cannot tell the highlighter which block it is in.
+ */
+export function vueBlockLanguage(file: string, line: number): string {
+  let language = 'html'
+  const lines = file.split('\n').slice(0, line)
+  for (const [index, text] of lines.entries()) {
+    const isTarget = index === lines.length - 1
+    const open = /^<(script|style)\b([^>]*)>/.exec(text)
+    if (open) {
+      if (isTarget) return 'html'
+      const lang = /\blang="([\w-]+)"/.exec(open[2]!)?.[1]
+      language = open[1] === 'script' ? (lang === 'ts' ? 'typescript' : 'javascript') : (lang ?? 'css')
+    } else if (/^<\/(script|style)>/.test(text)) {
+      if (isTarget) return 'html'
+      language = 'html'
+    }
+  }
+  return language
+}
+
+/**
+ * The language to hand the highlighter for a chunk starting at `line`, or
+ * undefined to let it infer one from the path. A `.vue` file needs its own
+ * text (`file`) to tell its blocks apart.
+ */
+export function chunkLanguage(path: string, line: number, file?: string): string | undefined {
+  const extension = path.split('.').pop() ?? ''
+  if (extension === 'vue') return file === undefined ? 'typescript' : vueBlockLanguage(file, line)
+  return LANGUAGE_BY_EXTENSION[extension]
+}
