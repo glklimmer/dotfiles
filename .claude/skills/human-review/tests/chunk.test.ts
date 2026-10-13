@@ -104,8 +104,8 @@ test('a hunk with an empty side keeps git\'s header numbers', () => {
 test('a .vue chunk is highlighted in the language of the block it sits in', () => {
   const file = ['<template>', '  <div />', '</template>', '', '<script setup lang="ts">', 'const a = 1', '</script>', '', '<style lang="scss" scoped>', '.a { b: c }', '</style>'].join('\n')
 
-  expect(chunkLanguage('app/x.vue', 2, file)).toBe('html')
-  expect(chunkLanguage('app/x.vue', 5, file)).toBe('html')
+  expect(chunkLanguage('app/x.vue', 2, file)).toBe('xml')
+  expect(chunkLanguage('app/x.vue', 5, file)).toBe('xml')
   expect(chunkLanguage('app/x.vue', 6, file)).toBe('typescript')
   expect(chunkLanguage('app/x.vue', 10, file)).toBe('scss')
 })

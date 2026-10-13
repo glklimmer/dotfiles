@@ -201,28 +201,41 @@ export function toRuns(diffSource: string): DiffRun[][] {
 /** Languages the highlighter is told outright, where inferring from the path falls short. */
 const LANGUAGE_BY_EXTENSION: Record<string, string> = { rs: 'rust' }
 
+const BLOCK_OPEN = /^<(script|style)\b([^>]*)>/
+const BLOCK_CLOSE = /^<\/(script|style)>/
+
+/** `<script>` as TypeScript or JavaScript by its `lang`, `<style>` as its `lang` or CSS. */
+function blockLanguage(tag: string, attributes: string): string {
+  const lang = /\blang="([\w-]+)"/.exec(attributes)?.[1]
+  if (tag === 'script') return lang === 'ts' ? 'typescript' : 'javascript'
+  return lang ?? 'css'
+}
+
 /**
- * The language of the `.vue` block holding `line` (1-based): `<script>` as
- * TypeScript or JavaScript by its `lang`, `<style>` as its `lang` or CSS, and
- * the template and the block tags themselves as HTML. Each line is highlighted
- * on its own, so it cannot tell the highlighter which block it is in.
+ * The language of each `.vue` line, walking the block tags from `initial`,
+ * the language of the block the first line sits in. The template and the
+ * block tags themselves are XML, highlight.js's id for HTML. Each line is
+ * highlighted on its own, so it cannot tell the highlighter which block it is in.
  */
-export function vueBlockLanguage(file: string, line: number): string {
-  let language = 'html'
-  const lines = file.split('\n').slice(0, line)
-  for (const [index, text] of lines.entries()) {
-    const isTarget = index === lines.length - 1
-    const open = /^<(script|style)\b([^>]*)>/.exec(text)
+export function vueLineLanguages(lines: string[], initial: string): string[] {
+  let current = initial
+  return lines.map(text => {
+    const open = BLOCK_OPEN.exec(text)
     if (open) {
-      if (isTarget) return 'html'
-      const lang = /\blang="([\w-]+)"/.exec(open[2]!)?.[1]
-      language = open[1] === 'script' ? (lang === 'ts' ? 'typescript' : 'javascript') : (lang ?? 'css')
-    } else if (/^<\/(script|style)>/.test(text)) {
-      if (isTarget) return 'html'
-      language = 'html'
+      current = blockLanguage(open[1]!, open[2]!)
+      return 'xml'
     }
-  }
-  return language
+    if (BLOCK_CLOSE.test(text)) {
+      current = 'xml'
+      return 'xml'
+    }
+    return current
+  })
+}
+
+/** The language of the `.vue` block holding `line` (1-based). */
+export function vueBlockLanguage(file: string, line: number): string {
+  return vueLineLanguages(file.split('\n').slice(0, line), 'xml').at(-1) ?? 'xml'
 }
 
 /**

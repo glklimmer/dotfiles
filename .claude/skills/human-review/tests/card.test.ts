@@ -93,3 +93,14 @@ test('a language in the result header reaches the highlighter', async $ => {
   expect(await ui.find({ type: 'Text', text: 'Chunk 3/~12 · app/x.vue L10–11' })).toBeDefined()
   await ui.unmount()
 })
+
+test('a new .vue file highlights each block in its own language', async $ => {
+  const source = ['<template>', '  <div />', '</template>', '<script setup lang="ts">', 'const a = 1', '</script>'].join('\n')
+  const card = toolUse(`Chunk 1/~4 · app/x.vue L1–6 (source, xml)\n${source}`)
+  const ui = await $.ui.mount({ surface: 'terminal', ...card, props: { ...card.props, input: { ...INPUT, path: 'app/x.vue' } } })
+
+  const languages = (await ui.findAll({ type: 'Code' })).map(code => code.props.language)
+  expect(languages).toEqual(['xml', 'xml', 'xml', 'xml', 'typescript', 'xml'])
+  expect(await ui.find({ type: 'Text', text: '5 ' })).toBeDefined()
+  await ui.unmount()
+})

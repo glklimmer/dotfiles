@@ -1,6 +1,6 @@
 import type { EngineInterface, Register } from 'claude-code'
 
-import { chunkLanguage, parseDiff, selectChunk, toRuns } from './chunk'
+import { chunkLanguage, parseDiff, selectChunk, toRuns, vueLineLanguages } from './chunk'
 import type { Chunk, DiffRun } from './chunk'
 
 /** Numbers a finding `<chunk>.<n>`, or just `<n>` on a card without a chunk index, so the reviewer can refer to it. */
@@ -143,12 +143,33 @@ export function readResult(output: unknown): ShownCode | undefined {
 }
 
 /** `language` only when one was decided: a prop left undefined can make the engine refuse the tree. */
-function languageProp(shown: ShownCode): { language?: string } {
-  return shown.language ? { language: shown.language } : {}
+function languageProp(language: string | undefined): { language?: string } {
+  return language ? { language } : {}
 }
 
 function isCardInput(value: unknown): value is CardInput {
   return typeof (value as Partial<CardInput> | null)?.path === 'string'
+}
+
+/** One drawn line: its number, its diff marker (none on a source card) and the language it is highlighted in. */
+type CardRow = { lineNumber: number; kind?: DiffRun['kind']; text: string; language?: string }
+
+/**
+ * The card's lines, one list per hunk. A `.vue` card walks its block tags, so
+ * a chunk spanning `<template>` and `<script>` highlights each in its own language.
+ */
+function cardRows(shown: ShownCode, path: string): CardRow[][] {
+  const hunks: CardRow[][] =
+    shown.format === 'source'
+      ? [shown.source.split('\n').map((text, offset) => ({ lineNumber: shown.firstLine + offset, text }))]
+      : toRuns(shown.source).map(runs =>
+          runs.flatMap(run => run.text.split('\n').map((text, offset) => ({ lineNumber: run.firstLine + offset, kind: run.kind, text }))),
+        )
+  if (!path.endsWith('.vue')) return hunks.map(rows => rows.map(row => ({ ...row, language: shown.language })))
+
+  const languages = vueLineLanguages(hunks.flat().map(row => row.text), shown.language ?? 'xml')
+  let index = 0
+  return hunks.map(rows => rows.map(row => ({ ...row, language: languages[index++] })))
 }
 
 /**
@@ -156,13 +177,13 @@ function isCardInput(value: unknown): value is CardInput {
  * line is its own row beside its own `Code`: a gutter spanning a multi-line
  * `Code` drifts, since `Code` draws no row for an empty line and wraps long ones.
  */
-function gutter(lineNumber: number, kind: DiffRun['kind'], width: number): string {
-  return `${String(lineNumber).padStart(width)} ${kind}`
+function gutter(row: CardRow, width: number): string {
+  const number = String(row.lineNumber).padStart(width)
+  return row.kind ? `${number} ${row.kind}` : number
 }
 
-function gutterWidth(hunks: DiffRun[][]): number {
-  const lastNumbers = hunks.flat().map(run => run.firstLine + run.text.split('\n').length - 1)
-  return String(Math.max(...lastNumbers)).length
+function gutterWidth(hunks: CardRow[][]): number {
+  return String(Math.max(...hunks.flat().map(row => row.lineNumber))).length
 }
 
 /** Reads the chunk's hunks from git and cuts them to the requested range. */
@@ -235,23 +256,23 @@ export const register: Register = on => {
 
       const input = e.props.input
       const { Box, Text, Code } = $.ui.resolve(e)
+      const hunks = cardRows(shown, input.path)
+      const width = gutterWidth(hunks)
       const code =
-        shown.format === 'source' ? (
-          <Code source={shown.source} path={input.path} startLine={shown.firstLine} {...languageProp(shown)} />
+        shown.format === 'source' && !input.path.endsWith('.vue') ? (
+          <Code source={shown.source} path={input.path} startLine={shown.firstLine} {...languageProp(shown.language)} />
         ) : (
-          toRuns(shown.source).map((runs, index, hunks) => (
+          hunks.map((rows, index) => (
             <Box flexDirection="column">
               {index > 0 ? <Text dimColor>⋯</Text> : null}
-              {runs.flatMap(run =>
-                run.text.split('\n').map((text, offset) => (
-                  <Box flexDirection="row" backgroundColor={RUN_BACKGROUND[run.kind]}>
-                    <Text dimColor>{gutter(run.firstLine + offset, run.kind, gutterWidth(hunks))} </Text>
-                    <Box flexGrow={1}>
-                      <Code source={text} path={input.path} {...languageProp(shown)} />
-                    </Box>
+              {rows.map(row => (
+                <Box flexDirection="row" backgroundColor={row.kind ? RUN_BACKGROUND[row.kind] : undefined}>
+                  <Text dimColor>{gutter(row, width)} </Text>
+                  <Box flexGrow={1}>
+                    <Code source={row.text} path={input.path} {...languageProp(row.language)} />
                   </Box>
-                )),
-              )}
+                </Box>
+              ))}
             </Box>
           ))
         )
