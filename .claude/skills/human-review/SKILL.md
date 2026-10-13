@@ -52,7 +52,7 @@ Launch one `Agent`. Its prompt:
 
 When the report arrives, verify each finding against the code. Drop findings without a matching quoted line, nits, and wrong ones (one line each saying why). Then start the chunks:
 
-- Walked chunks: pass each finding in that chunk's `findings`.
+- Walked chunks: pass each finding in that chunk's `findings`, with a `title` of a few words. The card numbers them `<chunk>.<n>`; use that number when referring to a finding.
 - Specs, config and group-approved chunks: surface the major ones once before the end summary.
 
 ## 3. Chunks
@@ -75,7 +75,7 @@ Replies are plain text. Never suggest `!` or `?` prefixes: `!` runs a shell comm
 - `walk specs`: add spec and config chunks to the end of the plan.
 - Anything else is a question: answer from the code (Read/Grep as needed; say so when only the author can know), then wait.
 
-When proposing a change (a fix, "how would it look"), call `mcp__human-review__show_proposal` once per file with the diff: hunks with real line numbers (Read the file first), unchanged stretches omitted by starting a new hunk. Put any context needed to follow it after the call. Without the tool, use one ```` ```diff ```` block.
+Every code change you show goes through `mcp__human-review__show_proposal`: fixes, "how would it look", alternatives to compare, even a two-line sketch inside an answer. Call it once per file with the diff: hunks with real line numbers (Read the file first), unchanged stretches omitted by starting a new hunk. Put any context needed to follow it after the call. Without the tool, use one ```` ```diff ```` block.
 
 ## 5. Feedback queue
 
