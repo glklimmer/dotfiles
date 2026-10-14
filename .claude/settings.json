@@ -13,7 +13,8 @@
     "sentry-cli@claude-plugins-official": true,
     "tmux-claude-status@tmux-claude-status": true,
     "lua-lsp@claude-plugins-official": true,
-    "ruby-lsp@claude-plugins-official": true
+    "ruby-lsp@claude-plugins-official": true,
+    "human-review@denteo": true
   },
   "extraKnownMarketplaces": {
     "tmux-claude-status": {

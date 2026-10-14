@@ -1,6 +1,0 @@
-{
-  "name": "human-review",
-  "version": "0.1.0",
-  "author": { "name": "Gianluca Klimmer" },
-  "description": "Draws /human-review chunks from git with real highlighting and line numbers"
-}
