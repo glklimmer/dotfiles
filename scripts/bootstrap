@@ -237,6 +237,31 @@ install_claude() {
       --executable-path "$HOME/.local/share/flatpak/exports/bin/com.google.Chrome"
 }
 
+##
+# Boot splash themes from adi1090x/plymouth-themes, which also draw the LUKS
+# password prompt. Only the chosen theme folders are fetched (via the contents
+# API) because the full repo is several hundred MB of preview GIFs. Pixels is
+# made the active theme; switch with `sudo update-alternatives --config
+# default.plymouth` followed by `sudo update-initramfs -u`.
+install_plymouth_themes() {
+  step "plymouth themes"
+  local themes=(pack_3/pixels pack_1/circuit) changed= path name dir url
+  for path in "${themes[@]}"; do
+    name="${path#*/}" dir="/usr/share/plymouth/themes/${path#*/}"
+    [ -f "$dir/$name.plymouth" ] && continue
+    sudo install -d -m 755 "$dir"
+    curl -fsSL "https://api.github.com/repos/adi1090x/plymouth-themes/contents/$path" |
+      python3 -I -c 'import sys, json; print("\n".join(f["download_url"] for f in json.load(sys.stdin)))' |
+      while read -r url; do curl -fsSL "$url" | sudo tee "$dir/${url##*/}" >/dev/null; done
+    sudo update-alternatives --install /usr/share/plymouth/themes/default.plymouth default.plymouth \
+      "$dir/$name.plymouth" 100
+    changed=1
+  done
+  [ -n "$changed" ] || return 0
+  sudo update-alternatives --set default.plymouth /usr/share/plymouth/themes/pixels/pixels.plymouth
+  sudo update-initramfs -u
+}
+
 install_wayvnc() {
   has wayvnc && return
   local tmp
@@ -391,6 +416,7 @@ install_flatpaks
 install_tridactyl_native
 setup_tridactyl_local
 install_claude
+install_plymouth_themes
 setup_dock
 enable_services
 setup_denteo
