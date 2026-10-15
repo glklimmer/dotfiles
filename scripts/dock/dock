@@ -65,14 +65,13 @@ pc() { ssh -S "$SOCK" "$DOCK_HOST" bash -s -- "$@"; }
 
 ##
 # Hands everything back to the PC: closes the viewers and the idle inhibitor,
-# restores the sound card profile, unloads the pulse server the laptop used and
-# unbinds the USB devices. Runs on the PC with the card name as $1, from both
-# `dock off` and the watchdog, and does nothing when nothing is docked.
+# unloads the pulse server the laptop used and unbinds the USB devices. Runs on
+# the PC from both `dock off` and the watchdog, and does nothing when nothing is
+# docked.
 read -r -d '' PC_RELEASE <<'EOF' || true
 state="/run/user/$(id -u)/dock"
 [ -s "$state/watchdog.pid" ] && kill -- -"$(cat "$state/watchdog.pid")" 2>/dev/null
 [ -f "$state/viewers.pids" ] && while read -r pid; do kill -- -"$pid"; done <"$state/viewers.pids" 2>/dev/null
-[ -s "$state/profile" ] && pactl set-card-profile "$1" "$(cat "$state/profile")"
 [ -s "$state/pulse-module" ] && pactl unload-module "$(cat "$state/pulse-module")"
 rm -rf "$state"
 exec sudo -n dock-usb stop
@@ -142,10 +141,10 @@ watch_connection() {
 # because sshd alone would not notice a vanished peer for many minutes. Any
 # state left by an earlier dock that never got that far is released first.
 watchdog_on() {
-  { printf 'release=%q\n' "$PC_RELEASE"; cat <<'EOF'; } | pc "$PC_CARD" "$WATCHDOG_TIMEOUT"
+  { printf 'release=%q\n' "$PC_RELEASE"; cat <<'EOF'; } | pc "$WATCHDOG_TIMEOUT"
 set -e
 state="/run/user/$(id -u)/dock"
-bash -c "$release" _ "$1" || true
+bash -c "$release" || true
 mkdir -p "$state"
 printf '%s\n' "$release" >"$state/release"
 sshd=$$
@@ -160,8 +159,8 @@ setsid bash -c '
     ping -c1 -W2 "$2" >/dev/null 2>&1 && last=$SECONDS
   done
   rm -f "$4/watchdog.pid"
-  exec bash "$4/release" "$5"
-' _ "$sshd" "${SSH_CLIENT%% *}" "$2" "$state" "$1" >/dev/null 2>&1 </dev/null &
+  exec bash "$4/release"
+' _ "$sshd" "${SSH_CLIENT%% *}" "$1" "$state" >/dev/null 2>&1 </dev/null &
 echo $! >"$state/watchdog.pid"
 EOF
 }
@@ -267,11 +266,11 @@ set_card_profile() {
 
 ##
 # The PC's onboard card can only drive the digital (speakers) or the analog
-# (headphones) output at a time in its normal profiles, so it is switched to
-# pro-audio, which exposes both. Unlike the normal profiles, pro-audio leaves
-# the mixer alone, so the digital output stays muted if the analog profile was
-# active before; it is switched on explicitly. PC_RELEASE restores the previous
-# profile, which sets the mixer back to match it.
+# (headphones) output at a time in its normal profiles, so it stays on
+# pro-audio, which exposes both; bootstrap sets that up for good (see
+# dock_pc_audio there). Should the profile have been changed since, it is
+# switched back and the digital output, which pro-audio leaves as the mixer
+# had it, is unmuted.
 #
 # The laptop's own card is switched off meanwhile, so only the PC's devices are
 # offered while docked; `off` restores its profile, so undocked every output and
@@ -284,8 +283,6 @@ state="/run/user/$(id -u)/dock"
 mkdir -p "$state"
 pactl list short modules | grep -q 'module-native-protocol-tcp.*listen=127.0.0.1' ||
   pactl load-module module-native-protocol-tcp listen=127.0.0.1 port=4713 auth-anonymous=true >"$state/pulse-module"
-[ -f "$state/profile" ] ||
-  pactl list cards | awk -v card="$1" '$1 == "Name:" { found = ($2 == card) } found && /Active Profile:/ { print $3; exit }' >"$state/profile"
 pactl set-card-profile "$1" pro-audio
 amixer -q -c "$(pactl list cards | awk -v card="$1" '$1 == "Name:" { found = ($2 == card) } found && $1 == "api.alsa.card" { gsub(/"/, "", $3); print $3; exit }')" sset IEC958 on
 EOF
@@ -355,7 +352,7 @@ off() {
   fi
   step "PC"
   if connected; then
-    pc "$PC_CARD" <<<"$PC_RELEASE" || warn "could not hand everything back to the PC"
+    pc <<<"$PC_RELEASE" || warn "could not hand everything back to the PC"
   else
     warn "no connection to the PC; it takes everything back by itself ${WATCHDOG_TIMEOUT}s after losing the laptop"
   fi

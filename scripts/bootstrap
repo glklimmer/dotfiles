@@ -322,6 +322,29 @@ dock_wifi_powersave_check() {
 }
 
 ##
+# Keeps the PC's onboard card on pro-audio, which WirePlumber remembers once
+# set, and names its two outputs (~/scripts/dock/pc-audio.lua). Normal profiles
+# offer only the headphones or the speakers, which breaks both the dock and the
+# panel's output switcher. Pro-audio leaves the mixer alone, so the digital
+# output is unmuted once here; ALSA keeps that state across reboots.
+dock_pc_audio() {
+  local rule=.config/wireplumber/main.lua.d/51-dock-audio.lua changed=
+  if ! ssh "$1" "cmp -s - ~/$rule" <"$HOME/scripts/dock/pc-audio.lua"; then
+    ssh "$1" "mkdir -p ~/${rule%/*} && cat >~/$rule" <"$HOME/scripts/dock/pc-audio.lua"
+    changed=1
+  fi
+  ssh "$1" bash -s -- "$changed" <<'EOF'
+set -e
+card=alsa_card.pci-0000_00_1f.3
+[ -z "$1" ] || systemctl --user restart wireplumber
+for _ in $(seq 25); do pactl list short cards | grep -q "	$card	" && break; sleep 0.2; done
+pactl list cards | awk -v card="$card" '$1 == "Name:" { found = ($2 == card) } found && /Active Profile:/ { print $3; exit }' |
+  grep -qx pro-audio || pactl set-card-profile "$card" pro-audio
+amixer -q -c "$(pactl list cards | awk -v card="$card" '$1 == "Name:" { found = ($2 == card) } found && $1 == "api.alsa.card" { gsub(/"/, "", $3); print $3; exit }')" sset IEC958 on
+EOF
+}
+
+##
 # Optional: docks this laptop to a PC over the network (see ~/scripts/dock/dock).
 # Answering the prompt once stores DOCK_HOST in ~/.zshrc.local, so re-runs keep
 # the machine set up without asking again.
@@ -347,6 +370,7 @@ setup_dock() {
     echo "Cannot reach $host without a password; run ssh-copy-id $host and re-run."
     return
   fi
+  dock_pc_audio "$host"
   ssh "$host" "cmp -s - /usr/local/sbin/dock-usb && test -f /etc/sudoers.d/dock-usb &&
     nmcli -t -f NAME connection show | grep -qx dock && $(dock_wifi_powersave_check)" <"$HOME/scripts/dock/dock-usb" && return
   scp -q "$HOME/scripts/dock/dock-usb" "$host:/tmp/dock-usb"
