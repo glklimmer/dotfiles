@@ -43,6 +43,8 @@ PC_SPEAKERS=alsa_output.pci-0000_00_1f.3.pro-output-1
 PC_HEADPHONES=alsa_output.pci-0000_00_1f.3.pro-output-0
 PC_MIC=alsa_input.usb-Kingston_HyperX_Quadcast_4110-00.analog-stereo
 
+LAPTOP_CARD=alsa_card.pci-0000_00_1f.3-platform-skl_hda_dsp_generic
+
 STATE="${XDG_RUNTIME_DIR:-/run/user/$UID}/dock"
 SOCK="$STATE/ssh.sock"
 VNC_SOCK="$STATE/vnc.sock"
@@ -233,14 +235,22 @@ EOF
 }
 
 ##
-# Waits until pipewire-pulse lists a node, since tunnel modules return before
-# their sink or source exists and set-default-* would fail.
+# Waits until pipewire-pulse lists a node, since tunnel modules and card profile
+# changes return before their sink or source exists and set-default-* would
+# fail. Returns non-zero after 5 s so `off` can carry on regardless.
 wait_for_node() {
   for _ in $(seq 25); do
     pactl list short "$1" | grep -q "	$2	" && return
     sleep 0.2
   done
-  die "audio $1 $2 did not appear"
+  return 1
+}
+
+##
+# Prints a card's active profile name, which for UCM cards contains spaces.
+card_profile() {
+  pactl list cards | awk -v card="$1" '$1 == "Name:" { found = ($2 == card) }
+    found && /Active Profile:/ { sub(/.*Active Profile: /, ""); print; exit }'
 }
 
 ##
@@ -250,6 +260,10 @@ wait_for_node() {
 # the mixer alone, so the digital output stays muted if the analog profile was
 # active before; it is switched on explicitly. PC_RELEASE restores the previous
 # profile, which sets the mixer back to match it.
+#
+# The laptop's own card is switched off meanwhile, so only the PC's devices are
+# offered while docked; `off` restores its profile, so undocked every output and
+# microphone is back.
 audio_on() {
   step "audio"
   pc "$PC_CARD" <<'EOF'
@@ -265,6 +279,8 @@ amixer -q -c "$(pactl list cards | awk -v card="$1" '$1 == "Name:" { found = ($2
 EOF
   pactl get-default-sink >"$STATE/default-sink"
   pactl get-default-source >"$STATE/default-source"
+  [ -s "$STATE/laptop-profile" ] || card_profile "$LAPTOP_CARD" >"$STATE/laptop-profile"
+  pactl set-card-profile "$LAPTOP_CARD" off
   local server="server=tcp:127.0.0.1:$PULSE_PORT" latency=250
   [ "$(route)" = cable ] && latency=60
   local awake='session.suspend-timeout-seconds=0'
@@ -276,8 +292,8 @@ EOF
     pactl load-module module-tunnel-source "$server" latency_msec=100 source_name=pc_mic \
       source="$PC_MIC" "source_properties=\"device.description=\\\"PC - Microphone\\\"\""
   } >"$STATE/pulse-modules"
-  wait_for_node sinks pc_speakers
-  wait_for_node sources pc_mic
+  wait_for_node sinks pc_speakers || die "audio sink pc_speakers did not appear"
+  wait_for_node sources pc_mic || die "audio source pc_mic did not appear"
   pactl set-default-sink pc_speakers
   pactl set-default-source pc_mic
 }
@@ -314,8 +330,17 @@ off() {
   sudo -n dock-root usb detach || true
   step "audio"
   if [ -f "$STATE/pulse-modules" ]; then xargs -r -n1 pactl unload-module <"$STATE/pulse-modules" 2>/dev/null || true; fi
-  if [ -f "$STATE/default-sink" ]; then pactl set-default-sink "$(cat "$STATE/default-sink")" || true; fi
-  if [ -f "$STATE/default-source" ]; then pactl set-default-source "$(cat "$STATE/default-source")" || true; fi
+  if [ -s "$STATE/laptop-profile" ]; then
+    pactl set-card-profile "$LAPTOP_CARD" "$(cat "$STATE/laptop-profile")" || true
+  fi
+  if [ -s "$STATE/default-sink" ]; then
+    wait_for_node sinks "$(cat "$STATE/default-sink")" || true
+    pactl set-default-sink "$(cat "$STATE/default-sink")" || true
+  fi
+  if [ -s "$STATE/default-source" ]; then
+    wait_for_node sources "$(cat "$STATE/default-source")" || true
+    pactl set-default-source "$(cat "$STATE/default-source")" || true
+  fi
   step "PC"
   if connected; then
     pc "$PC_CARD" <<<"$PC_RELEASE" || warn "could not hand everything back to the PC"
