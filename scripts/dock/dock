@@ -247,10 +247,22 @@ wait_for_node() {
 }
 
 ##
-# Prints a card's active profile name, which for UCM cards contains spaces.
-card_profile() {
-  pactl list cards | awk -v card="$1" '$1 == "Name:" { found = ($2 == card) }
-    found && /Active Profile:/ { sub(/.*Active Profile: /, ""); print; exit }'
+# Prints the PipeWire object id and the active profile index of a card.
+card_state() {
+  pw-dump Device | python3 -Ic 'import json, sys
+for o in json.load(sys.stdin):
+    if o["info"]["props"].get("device.name") == sys.argv[1]:
+        print(o["id"], o["info"]["params"]["Profile"][0]["index"])' "$1"
+}
+
+##
+# Switches a card to a profile index without WirePlumber remembering it, unlike
+# `pactl set-card-profile`. A laptop rebooted while docked therefore comes back
+# with its card on rather than stuck on "off".
+set_card_profile() {
+  local id _
+  read -r id _ < <(card_state "$1")
+  [ -n "$id" ] && pw-cli set-param "$id" Profile "{ index: $2, save: false }" >/dev/null
 }
 
 ##
@@ -279,8 +291,8 @@ amixer -q -c "$(pactl list cards | awk -v card="$1" '$1 == "Name:" { found = ($2
 EOF
   pactl get-default-sink >"$STATE/default-sink"
   pactl get-default-source >"$STATE/default-source"
-  [ -s "$STATE/laptop-profile" ] || card_profile "$LAPTOP_CARD" >"$STATE/laptop-profile"
-  pactl set-card-profile "$LAPTOP_CARD" off
+  [ -s "$STATE/laptop-profile" ] || card_state "$LAPTOP_CARD" | cut -d' ' -f2 >"$STATE/laptop-profile"
+  set_card_profile "$LAPTOP_CARD" 0
   local server="server=tcp:127.0.0.1:$PULSE_PORT" latency=250
   [ "$(route)" = cable ] && latency=60
   local awake='session.suspend-timeout-seconds=0'
@@ -331,7 +343,7 @@ off() {
   step "audio"
   if [ -f "$STATE/pulse-modules" ]; then xargs -r -n1 pactl unload-module <"$STATE/pulse-modules" 2>/dev/null || true; fi
   if [ -s "$STATE/laptop-profile" ]; then
-    pactl set-card-profile "$LAPTOP_CARD" "$(cat "$STATE/laptop-profile")" || true
+    set_card_profile "$LAPTOP_CARD" "$(cat "$STATE/laptop-profile")" || true
   fi
   if [ -s "$STATE/default-sink" ]; then
     wait_for_node sinks "$(cat "$STATE/default-sink")" || true
