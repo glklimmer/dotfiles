@@ -338,7 +338,7 @@ $(dock_wifi_powersave_off)"
 enable_services() {
   step "systemd user services"
   systemctl --user daemon-reload
-  systemctl --user enable --now theme-sync.service
+  systemctl --user enable --now theme-sync.service spotify-volume.service
 }
 
 setup_denteo() {

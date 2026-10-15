@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+##
+# Keeps Spotify's volume across restarts. The Linux client forces its audio
+# stream to 100% when it starts, overriding what WirePlumber restores, so this
+# watches PulseAudio events: every volume change on a Spotify stream is saved,
+# and for GRACE seconds after a new Spotify stream appears any volume that
+# differs from the saved one is put back.
+set -u
+
+STATE_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/spotify-volume"
+GRACE=5
+
+##
+# Prints the raw volume (0-65536) of sink input $1 if it belongs to Spotify,
+# nothing otherwise.
+spotify_volume() {
+  pactl list sink-inputs | awk -v header="Sink Input #$1" '
+    $0 == header { sel = 1; next }
+    /^Sink Input #/ { sel = 0 }
+    sel && /^\tVolume:/ { volume = $3 }
+    sel && /application.name = "Spotify"/ { spotify = 1 }
+    END { if (spotify) print volume }'
+}
+
+saved_volume() {
+  cat "$STATE_FILE" 2>/dev/null
+}
+
+declare -A restore_until
+
+pactl subscribe | while read -r line; do
+  [[ "$line" =~ ^Event\ \'(new|change)\'\ on\ sink-input\ \#([0-9]+)$ ]] || continue
+  event="${BASH_REMATCH[1]}" id="${BASH_REMATCH[2]}"
+  volume="$(spotify_volume "$id")"
+  [[ -n "$volume" ]] || continue
+  saved="$(saved_volume)"
+
+  [[ "$event" == new ]] && restore_until[$id]=$((SECONDS + GRACE))
+
+  if ((SECONDS < ${restore_until[$id]:-0})); then
+    if [[ -n "$saved" && "$volume" != "$saved" ]]; then
+      echo "restoring sink input #$id from $volume to $saved"
+      pactl set-sink-input-volume "$id" "$saved"
+    fi
+  elif [[ "$volume" != "$saved" ]]; then
+    mkdir -p "$(dirname "$STATE_FILE")"
+    echo "$volume" >"$STATE_FILE"
+  fi
+done
