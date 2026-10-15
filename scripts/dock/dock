@@ -189,7 +189,10 @@ wait_for_port() {
 ##
 # Fake outputs on the laptop, each streamed by wayvnc to a fullscreen viewer on
 # one PC monitor. The PC gets no input from its own mouse meanwhile, so GNOME is
-# inhibited from blanking or suspending, which would cut the dock off.
+# inhibited from blanking or suspending, which would cut the dock off. Over the
+# cable the viewers ask for lossless frames; over Wi-Fi a playing video would
+# then fill the link, so they allow JPEG, which TigerVNC applies only to
+# many-coloured regions such as video and leaves text lossless.
 monitors_on() {
   step "monitors"
   sudo -n dock-root monitors on
@@ -207,8 +210,11 @@ monitors_on() {
     echo $! >>"$STATE/wayvnc.pids"
   done
   for i in "${!VNC_PORTS[@]}"; do wait_for_port "${VNC_PORTS[$i]}"; done
-  pc "${VNC_PORTS[@]}" <<'EOF'
+  pc "$(route)" "${VNC_PORTS[@]}" <<'EOF'
 set -e
+quality=(-NoJPEG)
+[ "$1" = wifi ] && quality=(-QualityLevel=8)
+shift
 state="/run/user/$(id -u)/dock"
 mkdir -p "$state"
 shell=$(pgrep -u "$USER" -x gnome-shell | head -1)
@@ -218,7 +224,7 @@ echo $! >>"$state/viewers.pids"
 monitor=1
 for port in "$@"; do
   setsid vncviewer -FullScreen -FullScreenMode=Selected -FullScreenSelectedMonitors=$monitor \
-    -ViewOnly -SecurityTypes=None -AutoSelect=0 -NoJPEG -CompressLevel=1 -DotWhenNoCursor=0 \
+    -ViewOnly -SecurityTypes=None -AutoSelect=0 "${quality[@]}" -CompressLevel=1 -DotWhenNoCursor=0 \
     "localhost::$port" >/dev/null 2>&1 </dev/null &
   echo $! >>"$state/viewers.pids"
   monitor=$((monitor + 1))
