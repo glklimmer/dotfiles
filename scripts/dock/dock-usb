@@ -69,11 +69,26 @@ start() {
   done
 }
 
+##
+# Hands every exported device back by unplugging and replugging it in software:
+# its port is disabled and re-enabled, so the PC enumerates it from scratch.
+# `usbip unbind` only resets the device and reprobes it, which some devices do
+# not survive after USB/IP use; the Razer Naga then fails every HID probe
+# (-32, -75) and later even its configuration (-71) until physically replugged.
+# The bus ID is dropped from usbip-host's match list first, or usbip-host would
+# claim the device again when it reappears. match_busid takes the bus ID
+# verbatim, so a trailing newline makes it fail with "No such device".
 stop() {
-  local dev usbip
-  usbip=$(tool usbip)
+  local dev busid port
   for dev in /sys/bus/usb/drivers/usbip-host/*-*; do
-    [ -e "$dev" ] && quiet "$usbip" unbind -b "$(basename "$dev")"
+    [ -e "$dev" ] || continue
+    busid=$(basename "$dev")
+    port=$(readlink -f "$dev/port")
+    printf '%s' "$busid" >/sys/bus/usb/drivers/usbip-host/unbind
+    printf 'del %s' "$busid" >/sys/bus/usb/drivers/usbip-host/match_busid
+    echo 1 >"$port/disable"
+    sleep 0.5
+    echo 0 >"$port/disable"
   done
   pkill -x usbipd || true
   iptables -D "${FIREWALL[@]}" 2>/dev/null || true
