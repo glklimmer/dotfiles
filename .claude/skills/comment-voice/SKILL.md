@@ -12,7 +12,7 @@ Much more casual than chat answers:
 - terse, usually one short sentence; never essay-style
 - no markdown except backticks: no bold or headings, but wrap code (identifiers, snippets, file names) in backticks
 - direct, no hedging or fluff
-- no intent prefixes (`suggestion:`, `question:`, `nit:`); the phrasing carries the intent
+- no lead-in before the actual comment: no intent prefixes (`suggestion:`, `question:`, `nit:`) and no softeners like "small one:" or "minor:"; start with the point itself, the phrasing carries the intent
 - no hypotheticals or speculative scenarios; state the point plainly
 
 Example:
