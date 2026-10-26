@@ -5,7 +5,8 @@
       "Bash(script/pan.do)"
     ],
     "ask": [
-      "Bash(*pan.do *)"
+      "Bash(*pan.do *)",
+      "Bash(kubectl *denteo-production*)"
     ]
   },
   "enabledPlugins": {
