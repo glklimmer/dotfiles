@@ -9,10 +9,10 @@ usage() {
 Usage: $(basename "$0") [-p denteo|warppcs]
 
 Restore work: reopens each worktree window saved by sw in the current tmux
-session, skipping branches that already have a window open anywhere. dental
-and dhc entries go through \`nt -r <repo> [-n <name>] <branch>\`; warppcs
-entries get a window in their existing worktree. Either way the window runs
-\`claude --continue\` and resumes its last session.
+session through \`nt -r <repo> [-n <name>] <branch>\`, skipping branches that
+already have a window open anywhere. nt recreates a worktree that is gone, and
+in one that still exists the window runs \`claude --continue\` and resumes its
+last session.
 
   -p <project>  Only restore that project's entries (denteo = dental and dhc).
 EOF
@@ -50,34 +50,6 @@ project_of() {
   esac
 }
 
-# Prints the checkout of <branch> in the repo at <dir>, or nothing.
-find_worktree() {
-  git -C "$1" worktree list --porcelain | awk -v b="$2" '
-    /^worktree / { wt = substr($0, 10); next }
-    /^branch refs\/heads\// {
-      if (!found && substr($0, 19) == b) { found = wt }
-    }
-    END { if (found) print found }
-  '
-}
-
-# Opens a claude --continue window in the warppcs worktree of <branch>. Those
-# worktrees are created by claude itself and may be gone by now, so a missing
-# one is reported and skipped rather than recreated.
-open_warppcs() {
-  local branch="$1" name="$2" dir win title
-  dir=$(find_worktree "$HOME/development/warppcs" "$branch")
-  if [ -z "$dir" ] || [ ! -d "$dir" ]; then
-    echo "No worktree left: warppcs $branch"
-    return 0
-  fi
-  win=$(tmux new-window -d -P -F '#{window_id}' -c "$dir" "claude --continue; exec \$SHELL")
-  title="${branch##*/}"
-  title="${name:-${title#worktree-}}"
-  tmux rename-window -t "$win" "$title"
-  tmux set-window-option -t "$win" automatic-rename off
-}
-
 OPEN=$(sw -o | cut -d" " -f1,2)
 
 while read -r repo branch name; do
@@ -87,12 +59,7 @@ while read -r repo branch name; do
     echo "Already open: $repo $branch"
     continue
   fi
-  case "$repo" in
-    warppcs) open_warppcs "$branch" "$name" ;;
-    *)
-      name_opt=()
-      [ -n "$name" ] && name_opt=(-n "$name")
-      nt -r "$repo" "${name_opt[@]}" "$branch" </dev/null
-      ;;
-  esac
+  name_opt=()
+  [ -n "$name" ] && name_opt=(-n "$name")
+  nt -r "$repo" "${name_opt[@]}" "$branch" </dev/null || echo "Failed to restore: $repo $branch" >&2
 done <"$STATE_FILE"
