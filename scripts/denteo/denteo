@@ -15,7 +15,7 @@ if [ -s "${NT_STATE_FILE:-$HOME/.local/state/nt/windows}" ]; then
   read -k 1 "reply?Restore work (rw)? [Y/n] "
   [ "$reply" != $'\n' ] && echo
   if [[ "$reply" != [nN] ]]; then
-    rw
+    rw -p denteo
   fi
 fi
 

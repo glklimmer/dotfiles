@@ -1,15 +1,15 @@
 #!/bin/zsh
 
-# Shuts down, first offering to save the denteo session's worktree windows (sw)
-# when that session is open and differs from what was last saved.
+# Shuts down, first offering to save the worktree windows of every tmux session
+# (sw) when tmux is running and they differ from what was last saved.
 
 saved=${NT_STATE_FILE:-$HOME/.local/state/nt/windows}
 
-if tmux has-session -t denteo 2>/dev/null &&
-  [ "$(sw -s denteo -l)" != "$(cat $saved 2>/dev/null)" ] &&
+if tmux has-session 2>/dev/null &&
+  [ "$(sw -l)" != "$(cat $saved 2>/dev/null)" ] &&
   { read -k 1 "reply?Save work (sw) first? [Y/n] "; [[ $reply != [nN] ]] }; then
   echo
-  sw -s denteo || exit
+  sw || exit
 fi
 echo
 shutdown 0

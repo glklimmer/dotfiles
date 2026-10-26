@@ -9,6 +9,16 @@ fi
 # Rename the current session to "warppcs"
 tmux rename-session 'warppcs'
 
+# Offer to reopen the worktree windows saved by sw. Asked before any send-keys,
+# because keys sent to this pane would be swallowed by read as the answer.
+if [ -s "${NT_STATE_FILE:-$HOME/.local/state/nt/windows}" ]; then
+  read -k 1 "reply?Restore work (rw)? [Y/n] "
+  [ "$reply" != $'\n' ] && echo
+  if [[ "$reply" != [nN] ]]; then
+    rw -p warppcs
+  fi
+fi
+
 # Navigate to the specific folder in tmux
 cd ~/development/warppcs
 tmux send-keys ' cd ~/development/warppcs' C-m
