@@ -6,17 +6,20 @@ WINDOW_NAME=""
 
 usage() {
   cat >&2 <<EOF
-Usage: $(basename "$0") [-r dental|dhc] [-n <window-name>] <branch-name> [prompt...]
+Usage: $(basename "$0") [-r dental|dhc|warppcs] [-n <window-name>] <branch-name> [prompt...]
 
 Examples:
     $(basename "$0") feat/1234-add-feature
     $(basename "$0") -r dhc feat/1234-add-feature
+    $(basename "$0") -r warppcs feat/raid-lock
     $(basename "$0") feat/1234-add-feature "Read HANDOFF.md and implement it"
 
 Creates (or reuses) a worktree for <branch> in the selected repo, opens a new
 tmux window in it, runs bin/setup-worktree, then starts claude once setup
-completes. Defaults to dental; -r dhc targets ~/denteo/dhc. -n overrides the
-window name derived from the branch.
+completes. Defaults to dental; -r dhc targets ~/denteo/dhc. -r warppcs targets
+~/development/warppcs, where the worktree is added under .claude/worktrees with
+plain git (branched off origin/master when new) and needs no setup step. -n
+overrides the window name derived from the branch.
 
 If a prompt is given, the new claude session is seeded with it (claude
 --continue when reusing an existing worktree). For long handoffs, put the
@@ -46,8 +49,10 @@ BRANCH="$1"
 shift
 PROMPT="$*"
 
-# Per-repo worktree tooling. Both CLIs take the same `code:<cmd> <branch>`
-# arguments, so only the path and the entrypoint differ.
+# Per-repo worktree tooling. The denteo CLIs take the same `code:<cmd> <branch>`
+# arguments, so only the path and the entrypoint differ. warppcs has no such
+# tooling, so CREATE_CMD is empty and create_warppcs_worktree runs instead.
+SETUP_CMD="bin/setup-worktree && "
 case "$REPO" in
   dental)
     REPO_DIR="$HOME/denteo/dental"
@@ -57,8 +62,13 @@ case "$REPO" in
     REPO_DIR="$HOME/denteo/dhc"
     CREATE_CMD="bin/ws"
     ;;
+  warppcs)
+    REPO_DIR="$HOME/development/warppcs"
+    CREATE_CMD=""
+    SETUP_CMD=""
+    ;;
   *)
-    echo "Error: unknown repo '$REPO' (expected dental or dhc)" >&2
+    echo "Error: unknown repo '$REPO' (expected dental, dhc or warppcs)" >&2
     exit 1
     ;;
 esac
@@ -78,6 +88,22 @@ find_worktree() {
   '
 }
 
+# Adds a warppcs worktree for $BRANCH in .claude/worktrees, next to the ones
+# claude creates, so sw and rw pick it up the same way. $1 is the subcommand
+# the denteo CLIs would get: code:checkout for an existing branch (git tracks
+# origin's copy when there is no local one), code:new to branch off a freshly
+# fetched origin/master.
+create_warppcs_worktree() {
+  local dir="$REPO_DIR/.claude/worktrees/${BRANCH//\//-}"
+  if [ "$1" = code:checkout ]; then
+    git -C "$REPO_DIR" fetch origin
+    git -C "$REPO_DIR" worktree add "$dir" "$BRANCH"
+  else
+    git -C "$REPO_DIR" fetch origin master
+    git -C "$REPO_DIR" worktree add --no-track -b "$BRANCH" "$dir" origin/master
+  fi
+}
+
 WORKTREE_DIR=$(find_worktree)
 
 if [ -n "$WORKTREE_DIR" ] && [ -d "$WORKTREE_DIR" ]; then
@@ -93,8 +119,13 @@ else
     SUBCMD="code:new"
   fi
 
-  echo "Creating $REPO worktree for $BRANCH ($CREATE_CMD $SUBCMD)"
-  (cd "$REPO_DIR" && "$CREATE_CMD" "$SUBCMD" "$BRANCH")
+  if [ -n "$CREATE_CMD" ]; then
+    echo "Creating $REPO worktree for $BRANCH ($CREATE_CMD $SUBCMD)"
+    (cd "$REPO_DIR" && "$CREATE_CMD" "$SUBCMD" "$BRANCH")
+  else
+    echo "Creating $REPO worktree for $BRANCH (git worktree add, $SUBCMD)"
+    create_warppcs_worktree "$SUBCMD"
+  fi
 
   WORKTREE_DIR=$(find_worktree)
 
@@ -123,10 +154,11 @@ fi
 # '&&' guarantees claude only starts once setup has fully succeeded, so the
 # worktree env, deps, and db are ready — no racing on partial setup.
 NEW_WIN_ID=$(tmux new-window -d -P -F '#{window_id}' -c "$WORKTREE_DIR" \
-  "bin/setup-worktree && $CLAUDE_CMD; exec \$SHELL")
+  "$SETUP_CMD$CLAUDE_CMD; exec \$SHELL")
 
 # Title: leading ticket number if present, otherwise first dashed word
 TITLE="${BRANCH##*/}"
+TITLE="${TITLE#worktree-}"
 NUM="${TITLE%%[!0-9]*}"
 if [ -n "$NUM" ]; then
   TITLE="$NUM"
