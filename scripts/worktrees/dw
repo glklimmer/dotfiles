@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat >&2 <<EOF
+Usage: $(basename "$0")
+
+Done with a worktree: run inside an nt window after quitting claude. Removes
+the worktree this shell stands in through its repo's own cleanup
+(pan.do code:cleanup for dental, bin/ws cleanup for dhc, git worktree remove
+for warppcs) and closes the tmux window once that succeeds. On failure the
+window stays open with the error.
+EOF
+  exit 1
+}
+
+[ $# -eq 0 ] || usage
+
+if [ -z "${TMUX_PANE:-}" ]; then
+  echo "Error: must be run inside a tmux session." >&2
+  exit 1
+fi
+
+common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || {
+  echo "Error: not inside a git checkout." >&2
+  exit 1
+}
+top=$(git rev-parse --show-toplevel)
+main="${common%/.git}"
+
+if [ "$top" = "$main" ]; then
+  echo "Error: $top is the main checkout, not a worktree." >&2
+  exit 1
+fi
+
+case "$common" in
+  "$HOME/denteo/dental/.git")
+    (cd "$main" && script/pan.do code:cleanup "$top")
+    ;;
+  "$HOME/denteo/dhc/.git")
+    bin/ws cleanup
+    ;;
+  "$HOME/development/warppcs/.git")
+    branch=$(git branch --show-current)
+    git -C "$main" worktree remove "$top"
+    [ -z "$branch" ] || git -C "$main" branch -d "$branch" || true
+    ;;
+  *)
+    echo "Error: $top is not a dental, dhc or warppcs worktree." >&2
+    exit 1
+    ;;
+esac
+
+tmux kill-window -t "$TMUX_PANE"
