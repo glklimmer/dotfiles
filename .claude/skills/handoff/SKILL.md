@@ -13,7 +13,7 @@ the current working directory (or ask if neither applies):
 |---|---|---|
 | Repo | `~/denteo/dental` (GitLab, `glab`) | `~/development/warppcs` (GitHub, `gh`) |
 | Specs | `~/denteo/handoffs/<slug>.md` | `~/development/handoffs/<slug>.md` |
-| `nt` flag | none (default) | `-r warppcs` |
+| `nt` flag | none | none inside the repo, `-r warppcs` elsewhere |
 | Worktree | `pan.do code:new` + `bin/setup-worktree` | plain `git worktree add` under `.claude/worktrees/`, no setup step |
 | Links | `!<iid>` MRs, `#<num>` issues | `#<num>` PRs and issues |
 | Ends with | an MR | a PR |
@@ -23,7 +23,8 @@ Specs live outside the worktrees so the path is stable and readable from any of 
 ## Local tooling prerequisite
 
 The launch step uses `nt` (`~/scripts/worktrees/nt`), a personal helper:
-`nt [-r dental|dhc|warppcs] <branch> [prompt...]` creates (or reuses) the worktree,
+`nt [-r dental|dhc|warppcs] <branch> [prompt...]` creates (or reuses) the worktree
+in the repo the current directory belongs to (dental outside all of them),
 opens a new tmux window in it, runs the repo's setup step, and starts a `claude`
 seeded with the prompt (`claude --continue` when reusing a worktree). Set `NT_AUTO=1`
 to launch that `claude` in auto-accept mode (`--permission-mode auto`) so the handoff
@@ -54,16 +55,16 @@ tmux. Without `nt`, produce the spec file and give the equivalent worktree-creat
    # dental
    NT_AUTO=1 nt <branch> "Read ~/denteo/handoffs/<slug>.md and implement it. Work in this worktree. Create an MR when done."
    # warppcs
-   NT_AUTO=1 nt -r warppcs <branch> "Read ~/development/handoffs/<slug>.md and implement it. Work in this worktree. Create a PR when done."
+   NT_AUTO=1 nt <branch> "Read ~/development/handoffs/<slug>.md and implement it. Work in this worktree. Create a PR when done."
    ```
 
    Keep the prompt short; put the real detail in the file (specs contain
    backticks/code that are fragile as a shell arg).
 
    The agent runs in a background tmux window (`tmux list-windows -a` to find it;
-   warppcs windows are named `warppcs/<word>`), not in this session. After running,
-   report that the agent is launched and name the tmux window so the user can switch
-   to it. Don't `tmux capture-pane` to verify the launch; the user sees the window.
+   windows are named after the branch's ticket number or first word), not in this
+   session. After running, report that the agent is launched and name the tmux
+   window so the user can switch to it. Don't `tmux capture-pane` to verify the launch; the user sees the window.
    Only skip running `nt`, or drop `NT_AUTO=1`, if the user explicitly says so.
 
 ## Spec structure
