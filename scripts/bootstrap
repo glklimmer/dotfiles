@@ -232,7 +232,7 @@ install_claude() {
     "$claude" plugin list | grep -q "$plugin" || "$claude" plugin install "$plugin"
   done
   "$claude" mcp get chrome-devtools &>/dev/null ||
-    "$claude" mcp add -s user chrome-devtools -- "$HOME/.local/share/mise/shims/npx" -y chrome-devtools-mcp@latest \
+    "$claude" mcp add -s user chrome-devtools -- "$HOME/.local/share/mise/shims/npx" --prefix "$HOME" -y chrome-devtools-mcp@latest \
       --isolated --headless --viewport 1280x720 --no-usage-statistics \
       --executable-path "$HOME/.local/share/flatpak/exports/bin/com.google.Chrome"
 }
