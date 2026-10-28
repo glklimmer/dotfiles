@@ -48,6 +48,16 @@ ZSH_PLUGINS=(
   https://github.com/jeffreytse/zsh-vi-mode
 )
 
+PANEL_APPLETS_LEFT=(com.system76.CosmicAppletWorkspaces)
+PANEL_APPLETS_RIGHT=(
+  com.system76.CosmicAppletTime
+  com.system76.CosmicAppletStatusArea
+  com.system76.CosmicAppletBluetooth
+  com.system76.CosmicAppletAudio
+  com.system76.CosmicAppletNetwork
+  com.system76.CosmicAppletBattery
+)
+
 TRIDACTYL_NATIVE_VERSION=1.25.1
 
 CLAUDE_PLUGINS=(
@@ -145,6 +155,33 @@ install_dotfiles() {
     "${dotfiles[@]}" checkout
   fi
   "${dotfiles[@]}" config status.showUntrackedFiles no
+}
+
+##
+# Writes the COSMIC top panel's applet layout, which is left out of the dotfiles
+# because it differs per machine: the Bluetooth applet is optional. Runs only
+# while the file is missing, so a re-run keeps the layout a machine already has.
+# Applet changes made in COSMIC Settings belong in PANEL_APPLETS_LEFT and
+# PANEL_APPLETS_RIGHT as well, or a new machine won't get them.
+setup_cosmic_panel() {
+  step "cosmic panel"
+  local file="$HOME/.config/cosmic/com.system76.CosmicPanel.Panel/v1/plugins_wings"
+  [ -f "$file" ] && return
+  local right=() applet skip=
+  case "$(ask 'Show the Bluetooth applet in the COSMIC panel? [Y/n]')" in
+    [nN]*) skip=com.system76.CosmicAppletBluetooth ;;
+  esac
+  for applet in "${PANEL_APPLETS_RIGHT[@]}"; do
+    [ "$applet" = "$skip" ] || right+=("$applet")
+  done
+  mkdir -p "$(dirname "$file")"
+  {
+    echo 'Some((['
+    for applet in "${PANEL_APPLETS_LEFT[@]}"; do printf '    "%s",\n' "$applet"; done
+    echo '], ['
+    for applet in "${right[@]}"; do printf '    "%s",\n' "$applet"; done
+    printf ']))'
+  } >"$file"
 }
 
 install_zsh() {
@@ -432,6 +469,7 @@ setup_local_env
 install_apt_packages
 setup_auth
 install_dotfiles
+setup_cosmic_panel
 install_zsh
 install_mise
 install_rust
