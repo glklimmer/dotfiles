@@ -169,10 +169,11 @@ install_mise() {
 }
 
 install_rust() {
-  step "rust + alacritty"
+  step "rust + alacritty + sccache"
   has rustup || curl -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path
   # shellcheck source=/dev/null
   . "$HOME/.cargo/env"
+  has sccache || RUSTC_WRAPPER= cargo install sccache --locked
   has alacritty || cargo install alacritty
 }
 
