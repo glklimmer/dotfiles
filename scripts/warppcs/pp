@@ -3,17 +3,19 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<EOF
-Usage: $(basename "$0") [clients]
+Usage: $(basename "$0") [players]
 
-Replaces every other pane in the current tmux window with a warppcs test run:
-the server on the top half and <clients> clients (default 1) side by side on
-the bottom half. Run it from the warppcs checkout.
+Replaces every other pane in the current tmux window with a warppcs test run of
+<players> players (2-9, default 2): the host on the top half, since it plays
+too, and the remaining players as clients side by side on the bottom half. Run
+it from the warppcs checkout.
 EOF
   exit 1
 }
 
-CLIENTS="${1:-1}"
-[[ "$CLIENTS" =~ ^[1-9]$ ]] && [ $# -le 1 ] || usage
+PLAYERS="${1:-2}"
+[[ "$PLAYERS" =~ ^[2-9]$ ]] && [ $# -le 1 ] || usage
+CLIENTS=$((PLAYERS - 1))
 
 if [ -z "${TMUX:-}" ]; then
   echo "Error: must be run inside a tmux session." >&2
