@@ -48,9 +48,6 @@ alias ppc="$HOME/development/warppcs/target/release/ppc_console"
 # Add nvim to PATH
 export PATH="$PATH:/opt/nvim/bin"
 
-# sccache: shared compile cache across worktrees (wired in ~/.cargo/config.toml)
-export SCCACHE_CACHE_SIZE=40G
-
 # Set editor
 export EDITOR=nvim
 export VISUAL=nvim
