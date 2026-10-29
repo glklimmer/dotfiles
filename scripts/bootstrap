@@ -3,10 +3,14 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<EOF
-Usage: $(basename "$0")
+Usage: $(basename "$0") [--add PROFILE] [--remove PROFILE]
 
 Installs every tool and program this machine needs (Pop!_OS / Ubuntu) and
 wires up the dotfiles. Safe to re-run: each step skips what is already there.
+
+Profiles add the setup of one project on top (${PROFILES[*]}), each defined
+in ~/scripts/<profile>/bootstrap.sh. The first run asks which ones this
+machine gets and remembers the answer; --add and --remove change it later.
 
 Fresh machine:
     bash <(curl -fsSL https://raw.githubusercontent.com/glklimmer/dotfiles/master/scripts/bootstrap)
@@ -14,17 +18,13 @@ EOF
   exit 1
 }
 
-[ $# -eq 0 ] || usage
-
 APT_PACKAGES=(
   zsh tmux curl unzip p7zip-full build-essential
   ripgrep fd-find fzf jq xclip wl-clipboard htop
   ffmpegthumbnailer imagemagick poppler-utils
-  gh glab
+  gh
   # alacritty build deps
   cmake g++ pkg-config libfontconfig1-dev libxcb-xfixes0-dev libxkbcommon-dev python3
-  # denteo
-  postgresql postgresql-16-pgvector libpq-dev libvips libicu-dev libyaml-dev qpdf qrencode ffmpeg dcmtk
 )
 
 DOCK_APT_PACKAGES=(
@@ -40,7 +40,7 @@ WAYVNC_VERSION=v0.10.2
 NEATVNC_VERSION=v1.0.3
 AML_VERSION=v1.0.0
 
-FLATPAKS=(com.google.Chrome com.slack.Slack com.spotify.Client)
+FLATPAKS=(com.google.Chrome com.spotify.Client)
 
 ZSH_PLUGINS=(
   https://github.com/zsh-users/zsh-autosuggestions
@@ -60,13 +60,14 @@ PANEL_APPLETS_RIGHT=(
 
 TRIDACTYL_NATIVE_VERSION=1.25.1
 
-CLAUDE_PLUGINS=(
-  slack@claude-plugins-official
-  sentry-cli@claude-plugins-official
-  tmux-claude-status@tmux-claude-status
-)
+CLAUDE_PLUGINS=(tmux-claude-status@tmux-claude-status)
 
-GITLAB_HOST=git.panter.ch
+PROFILES=(denteo warppcs)
+PROFILES_FILE="$HOME/.config/bootstrap/profiles"
+
+##
+# Reminders printed after the final step; profiles append to it.
+NEXT_STEPS=("log out and back in (zsh)")
 
 step() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 has() { command -v "$1" &>/dev/null; }
@@ -84,6 +85,12 @@ ask_secret() {
   printf '%s' "$reply"
 }
 
+##
+# Creates a machine-local file readable only by the user, unless it exists.
+ensure_private() {
+  [ -f "$1" ] || install -D -m 600 /dev/null "$1"
+}
+
 clone() {
   local url="$1" dir="$2"
   [ -d "$dir" ] || git clone --depth 1 "$url" "$dir"
@@ -95,26 +102,29 @@ setup_git_identity() {
     git config --global user.name "$(ask 'Git name')"
   git config --global user.email >/dev/null ||
     git config --global user.email "$(ask 'Personal git email')"
-  if [ ! -f "$HOME/.gitconfig-denteo" ]; then
-    git config --global includeIf."gitdir:~/denteo/".path "~/.gitconfig-denteo"
-    git config -f "$HOME/.gitconfig-denteo" user.name "$(git config --global user.name)"
-    git config -f "$HOME/.gitconfig-denteo" user.email "$(ask 'Denteo git email')"
-  fi
 }
 
-setup_local_env() {
-  step "machine-local secrets (~/.zshrc.local)"
-  [ -f "$HOME/.zshrc.local" ] && return
-  local sentry_url sentry_token
-  sentry_url="$(ask 'Sentry URL')"
-  sentry_token="$(ask_secret 'Sentry auth token')"
-  install -m 600 /dev/null "$HOME/.zshrc.local"
-  cat >"$HOME/.zshrc.local" <<EOF
-# Sentry CLI
-export SENTRY_URL=$sentry_url
-export SENTRY_AUTH_TOKEN=$sentry_token
-export SENTRY_FORCE_ENV_TOKEN=1
-EOF
+##
+# Fills ACTIVE_PROFILES from PROFILES_FILE after applying the --add/--remove
+# arguments. Without the file (first run) it asks for each profile, so later
+# runs stay unattended.
+choose_profiles() {
+  local p
+  if [ ! -f "$PROFILES_FILE" ]; then
+    mkdir -p "$(dirname "$PROFILES_FILE")"
+    : >"$PROFILES_FILE"
+    for p in "${PROFILES[@]}"; do
+      [[ "$(ask "Set up the $p profile on this machine? [y/N]")" =~ ^[yY] ]] && echo "$p" >>"$PROFILES_FILE"
+    done
+  fi
+  for p in "${ADD_PROFILES[@]}"; do
+    grep -qx "$p" "$PROFILES_FILE" || echo "$p" >>"$PROFILES_FILE"
+  done
+  for p in "${REMOVE_PROFILES[@]}"; do
+    sed -i "/^$p\$/d" "$PROFILES_FILE"
+  done
+  mapfile -t ACTIVE_PROFILES <"$PROFILES_FILE"
+  echo "Profiles: ${ACTIVE_PROFILES[*]:-none} (stored in $PROFILES_FILE)"
 }
 
 install_apt_packages() {
@@ -134,10 +144,6 @@ setup_auth() {
   [ -f "$HOME/.ssh/id_ed25519" ] ||
     ssh-keygen -t ed25519 -C "$(git config --global user.email)" -f "$HOME/.ssh/id_ed25519"
   gh auth status &>/dev/null || gh auth login --git-protocol ssh
-  if ! glab auth status --hostname "$GITLAB_HOST" &>/dev/null; then
-    glab auth login --hostname "$GITLAB_HOST"
-    glab ssh-key add "$HOME/.ssh/id_ed25519.pub" -t "$(hostname)" --hostname "$GITLAB_HOST" || true
-  fi
 }
 
 install_dotfiles() {
@@ -238,9 +244,8 @@ install_tmux_plugins() {
 }
 
 install_flatpaks() {
-  step "flatpaks"
   flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-  flatpak install --user -y --noninteractive flathub "${FLATPAKS[@]}"
+  flatpak install --user -y --noninteractive flathub "$@"
 }
 
 install_tridactyl_native() {
@@ -250,25 +255,20 @@ install_tridactyl_native() {
     sh -s -- "$TRIDACTYL_NATIVE_VERSION"
 }
 
-setup_tridactyl_local() {
-  step "machine-local tridactyl commands (~/.config/tridactyl/tridactylrc.local)"
-  local rc="$HOME/.config/tridactyl/tridactylrc.local"
-  [ -f "$rc" ] && return
-  local password
-  password="$(ask_secret 'Denteo dev denteo_admin password')"
-  install -m 600 /dev/null "$rc"
-  printf 'command login js -d€ -r login.js€ %s\n' "$password" >"$rc"
+install_claude_plugins() {
+  local claude="$HOME/.local/bin/claude" plugin
+  for plugin in "$@"; do
+    "$claude" plugin list | grep -q "$plugin" || "$claude" plugin install "$plugin"
+  done
 }
 
 install_claude() {
   step "claude code"
   [ -x "$HOME/.local/bin/claude" ] || curl -fsSL https://claude.ai/install.sh | bash
-  local claude="$HOME/.local/bin/claude" plugin
+  local claude="$HOME/.local/bin/claude"
   "$claude" plugin marketplace list | grep -q tmux-claude-status ||
     "$claude" plugin marketplace add "$HOME/.config/tmux/plugins/tmux-claude-status"
-  for plugin in "${CLAUDE_PLUGINS[@]}"; do
-    "$claude" plugin list | grep -q "$plugin" || "$claude" plugin install "$plugin"
-  done
+  install_claude_plugins "${CLAUDE_PLUGINS[@]}"
   "$claude" mcp get chrome-devtools &>/dev/null ||
     "$claude" mcp add -s user chrome-devtools -- "$HOME/.local/share/mise/shims/npx" --prefix "$HOME" -y chrome-devtools-mcp@latest \
       --isolated --headless --viewport 1280x720 --no-usage-statistics \
@@ -392,6 +392,7 @@ setup_dock() {
   if ! grep -q '^export DOCK_HOST=' "$HOME/.zshrc.local" 2>/dev/null; then
     [[ "$(ask 'Set up dock on this machine? [y/N]')" =~ ^[yY] ]] || return 0
     host="$(ask 'PC to dock to, as user@host')"
+    ensure_private "$HOME/.zshrc.local"
     printf '\n# dock\nexport DOCK_HOST=%s\n' "$host" >>"$HOME/.zshrc.local"
   fi
   host="$(sed -n 's/^export DOCK_HOST=//p' "$HOME/.zshrc.local")"
@@ -428,29 +429,6 @@ enable_services() {
   systemctl --user enable --now theme-sync.service spotify-volume.service power-profile.service
 }
 
-setup_denteo() {
-  step "denteo"
-  sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname = '$USER'" | grep -q 1 ||
-    sudo -u postgres createuser --superuser "$USER"
-
-  mkdir -p "$HOME/denteo"
-  local repo
-  for repo in panter/dental denteo/dhc; do
-    local dir="$HOME/denteo/$(basename "$repo")"
-    [ -d "$dir" ] || git clone "git@git.panter.ch:$repo.git" "$dir" ||
-      echo "Could not clone $repo — add your SSH key to git.panter.ch and re-run."
-  done
-
-  if [ -d "$HOME/denteo/dental" ]; then
-    cd "$HOME/denteo/dental"
-    "$HOME/.local/bin/mise" trust
-    "$HOME/.local/bin/mise" install
-    "$HOME/.local/bin/mise" exec -- bun install
-    "$HOME/.local/bin/mise" exec -- bunx playwright install --with-deps chromium
-    cd - >/dev/null
-  fi
-}
-
 ##
 # Asks for the sudo password once and keeps the credential fresh until the
 # script exits, since long steps (cargo builds, mise installs) outlast sudo's
@@ -463,9 +441,21 @@ keep_sudo_alive() {
   done &
 }
 
+ADD_PROFILES=() REMOVE_PROFILES=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --add | --remove)
+      [ $# -ge 2 ] && [[ " ${PROFILES[*]} " == *" $2 "* ]] || usage
+      if [ "$1" = --add ]; then ADD_PROFILES+=("$2"); else REMOVE_PROFILES+=("$2"); fi
+      shift 2
+      ;;
+    *) usage ;;
+  esac
+done
+
+choose_profiles
 keep_sudo_alive
 setup_git_identity
-setup_local_env
 install_apt_packages
 setup_auth
 install_dotfiles
@@ -475,14 +465,20 @@ install_mise
 install_rust
 install_neovim
 install_tmux_plugins
-install_flatpaks
+step "flatpaks"
+install_flatpaks "${FLATPAKS[@]}"
 install_tridactyl_native
-setup_tridactyl_local
+step "machine-local tridactyl commands (~/.config/tridactyl/tridactylrc.local)"
+ensure_private "$HOME/.config/tridactyl/tridactylrc.local"
 install_claude
 install_plymouth_themes
 setup_dock
 enable_services
-setup_denteo
+for profile in "${ACTIVE_PROFILES[@]}"; do
+  # shellcheck source=/dev/null
+  . "$HOME/scripts/$profile/bootstrap.sh"
+  "setup_$profile"
+done
 
 step "done"
-echo "Next: log out and back in (zsh), then run bin/setup in ~/denteo/dental."
+printf 'Next: %s\n' "${NEXT_STEPS[@]}"

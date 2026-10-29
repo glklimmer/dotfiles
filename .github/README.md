@@ -16,18 +16,30 @@ after adding something to it:
 bootstrap
 ```
 
-It asks for your git name and emails and the Sentry URL/token, and walks you
-through `gh` / `glab` login (uploading a fresh SSH key). Nothing personal or
-secret is committed here: git identity lives in `~/.gitconfig{,-denteo}` and
-secrets in `~/.zshrc.local`, both machine-local.
+The first run asks which project profiles this machine gets and remembers the
+answer in `~/.config/bootstrap/profiles`:
 
-Afterwards, log out and back in (zsh becomes the login shell) and run `bin/setup`
-in `~/denteo/dental`.
+- **denteo**: postgres and the app's system libraries, Slack, `glab` login,
+  the denteo git email, Sentry token, and the `~/denteo` repos.
+- **warppcs**: Steam (system package, needed by the `steam` build feature),
+  Bevy build deps, Discord, the `~/development/warppcs` repo, and Aseprite
+  through Steam.
+
+Change them later with `bootstrap --add warppcs` or `bootstrap --remove denteo`.
+
+It asks for your git name and emails and walks you through `gh` / `glab` login
+(uploading a fresh SSH key). Nothing personal or secret is committed here: git
+identity lives in `~/.gitconfig{,-denteo}` and secrets in `~/.zshrc.local`,
+both machine-local.
+
+Afterwards, log out and back in (zsh becomes the login shell) and follow the
+remaining steps it prints.
 
 ### Installing something new
 
-Add it to `scripts/bootstrap` instead of installing it by hand, then run
-`bootstrap`, so the script stays the source of truth for this machine.
+Add it to `scripts/bootstrap`, or to `scripts/<profile>/bootstrap.sh` if only
+one project needs it, instead of installing it by hand. Then run `bootstrap`,
+so the script stays the source of truth for this machine.
 
 ### Patched cosmic-comp
 
