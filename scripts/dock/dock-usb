@@ -72,6 +72,10 @@ start() {
 ##
 # Hands every exported device back by unplugging and replugging it in software:
 # its port is disabled and re-enabled, so the PC enumerates it from scratch.
+# A USB 3 port shares its socket with a USB 2 peer port, so both are disabled
+# together; with only one disabled, a device such as the Logitech StreamCam
+# reconnects on the other as a new bus ID and later moves back, and the next
+# `start` binds a bus ID that is about to vanish.
 # `usbip unbind` only resets the device and reprobes it, which some devices do
 # not survive after USB/IP use; the Razer Naga then fails every HID probe
 # (-32, -75) and later even its configuration (-71) until physically replugged.
@@ -79,16 +83,17 @@ start() {
 # claim the device again when it reappears. match_busid takes the bus ID
 # verbatim, so a trailing newline makes it fail with "No such device".
 stop() {
-  local dev busid port
+  local dev busid port ports
   for dev in /sys/bus/usb/drivers/usbip-host/*-*; do
     [ -e "$dev" ] || continue
     busid=$(basename "$dev")
-    port=$(readlink -f "$dev/port")
+    ports=("$(readlink -f "$dev/port")")
+    [ -e "${ports[0]}/peer" ] && ports+=("$(readlink -f "${ports[0]}/peer")")
     printf '%s' "$busid" >/sys/bus/usb/drivers/usbip-host/unbind
     printf 'del %s' "$busid" >/sys/bus/usb/drivers/usbip-host/match_busid
-    echo 1 >"$port/disable"
+    for port in "${ports[@]}"; do echo 1 >"$port/disable"; done
     sleep 0.5
-    echo 0 >"$port/disable"
+    for port in "${ports[@]}"; do echo 0 >"$port/disable"; done
   done
   pkill -x usbipd || true
   iptables -D "${FIREWALL[@]}" 2>/dev/null || true
