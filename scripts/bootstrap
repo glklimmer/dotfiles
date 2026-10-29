@@ -375,6 +375,9 @@ dock_wifi_powersave_check() {
 # offer only the headphones or the speakers, which breaks both the dock and the
 # panel's output switcher. Pro-audio leaves the mixer alone, so the digital
 # output is unmuted once here; ALSA keeps that state across reboots.
+# The Sound Output Device Chooser extension also lists the card's ports from
+# the normal profiles; picking one leaves pro-audio, and the extension then
+# undoes the dock's switch back, so those ports are hidden in its settings.
 dock_pc_audio() {
   local rule=.config/wireplumber/main.lua.d/51-dock-audio.lua changed=
   if ! ssh "$1" "cmp -s - ~/$rule" <"$HOME/scripts/dock/pc-audio.lua"; then
@@ -388,6 +391,24 @@ card=alsa_card.pci-0000_00_1f.3
 for _ in $(seq 25); do pactl list short cards | grep -q "	$card	" && break; sleep 0.2; done
 pactl list cards | awk -v card="$card" '$1 == "Name:" { found = ($2 == card) } found && /Active Profile:/ { print $3; exit }' |
   grep -qx pro-audio || pactl set-card-profile "$card" pro-audio
+ext=~/.local/share/gnome-shell/extensions/sound-output-device-chooser@kgshank.net
+if [ -d "$ext/schemas" ]; then
+  sdc=(gsettings --schemadir "$ext/schemas")
+  key=(org.gnome.shell.extensions.sound-output-device-chooser ports-settings)
+  ports=$("${sdc[@]}" get "${key[@]}" | python3 -c '
+import ast, json, sys
+card, desc = sys.argv[1], "Built-in Audio"
+settings = json.loads(ast.literal_eval(sys.stdin.read()) or "{\"version\":3,\"ports\":[]}")
+hidden = {"analog-output-lineout": "Line Out", "analog-output-headphones": "Headphones",
+          "iec958-stereo-output": "Digital Output (S/PDIF)"}
+ports = [p for p in settings["ports"] if not (p["card_name"] == card and p["name"] in hidden)]
+ports += [{"human_name": human, "name": name, "display_option": 2, "card_name": card,
+           "card_description": desc, "display_name": f"{human} - {desc}"} for name, human in hidden.items()]
+settings["ports"] = ports
+print("\x27" + json.dumps(settings).replace("\\", "\\\\").replace("\x27", "\\\x27") + "\x27")
+' "$card")
+  "${sdc[@]}" set "${key[@]}" "$ports"
+fi
 amixer -q -c "$(pactl list cards | awk -v card="$card" '$1 == "Name:" { found = ($2 == card) } found && $1 == "api.alsa.card" { gsub(/"/, "", $3); print $3; exit }')" sset IEC958 on
 EOF
 }
