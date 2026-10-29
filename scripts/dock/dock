@@ -314,7 +314,8 @@ EOF
 usb_on() {
   step "mouse, keyboard + webcam"
   local busids
-  mapfile -t busids < <(ssh -S "$SOCK" "$DOCK_HOST" sudo -n dock-usb start "${DOCK_USB[@]}")
+  busids=$(ssh -S "$SOCK" "$DOCK_HOST" sudo -n dock-usb start "${DOCK_USB[@]}")
+  mapfile -t busids <<<"$busids"
   sudo -n dock-root usb attach "${busids[@]}"
 }
 
