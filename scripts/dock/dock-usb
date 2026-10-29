@@ -60,7 +60,7 @@ start() {
   done
   usbip=$(tool usbip)
   modprobe usbip-host
-  iptables -C "${FIREWALL[@]}" 2>/dev/null || iptables -I "${FIREWALL[@]}"
+  iptables -C "${FIREWALL[@]}" &>/dev/null || iptables -I "${FIREWALL[@]}"
   pgrep -x usbipd >/dev/null || quiet "$(tool usbipd)" -D -4 --tcp-port "$PORT"
   for id in "$@"; do
     busid=$(busid_of "$id")
