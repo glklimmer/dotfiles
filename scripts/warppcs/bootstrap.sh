@@ -17,12 +17,18 @@ ASEPRITE_STEAM_APP=431730
 
 ##
 # Opens Steam's install dialog for Aseprite (bought on Steam, launched by
-# ~/scripts/warppcs/aseprite) unless it is installed already. Steam runs
-# detached, so on a fresh machine the install finishes after logging in there.
+# ~/scripts/warppcs/aseprite) unless it is installed already. Steam drops an
+# install URL it receives while logged out, so before the first login this only
+# asks for one and a re-run opens the dialog.
 warppcs_aseprite() {
-  [ -f "$HOME/.steam/steam/steamapps/appmanifest_$ASEPRITE_STEAM_APP.acf" ] && return
+  local steam_dir="$HOME/.steam/steam"
+  [ -f "$steam_dir/steamapps/appmanifest_$ASEPRITE_STEAM_APP.acf" ] && return
+  if ! grep -q '"AccountName"' "$steam_dir/config/loginusers.vdf" 2>/dev/null; then
+    NEXT_STEPS+=("log in to Steam (run steam), then re-run bootstrap to install Aseprite")
+    return
+  fi
   nohup steam "steam://install/$ASEPRITE_STEAM_APP" >/dev/null 2>&1 &
-  NEXT_STEPS+=("confirm the Aseprite install in Steam (log in first if asked)")
+  NEXT_STEPS+=("confirm the Aseprite install in Steam")
 }
 
 setup_warppcs() {
