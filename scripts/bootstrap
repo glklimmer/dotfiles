@@ -190,6 +190,16 @@ setup_cosmic_panel() {
   } >"$file"
 }
 
+##
+# Keeps Bluetooth controllers powered off when bluetoothd starts, so the
+# machine boots with Bluetooth off until it is switched on in the panel.
+# BlueZ 5.72 reads no drop-in directory, so main.conf itself is edited.
+disable_bluetooth_autoenable() {
+  step "bluetooth off at boot"
+  grep -qx 'AutoEnable=false' /etc/bluetooth/main.conf && return
+  sudo sed -i 's/^#\?AutoEnable=.*/AutoEnable=false/' /etc/bluetooth/main.conf
+}
+
 install_zsh() {
   step "zsh + oh-my-zsh"
   if [ ! -d "$HOME/.oh-my-zsh" ]; then
@@ -460,6 +470,7 @@ install_apt_packages
 setup_auth
 install_dotfiles
 setup_cosmic_panel
+disable_bluetooth_autoenable
 install_zsh
 install_mise
 install_rust
