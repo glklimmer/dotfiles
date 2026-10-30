@@ -200,6 +200,25 @@ disable_bluetooth_autoenable() {
   sudo sed -i 's/^#\?AutoEnable=.*/AutoEnable=false/' /etc/bluetooth/main.conf
 }
 
+##
+# Turns the ThinkPad call keys F10 (answer) and F11 (hang up) and the F12 star
+# key into play/pause, next and previous track, which COSMIC passes to the
+# active MPRIS player. The scancodes come from the thinkpad_acpi input device
+# of a T14 Gen 6 (evtest's MSC_SCAN, hex); other machines don't match the
+# device name, so the file is harmless there.
+setup_thinkpad_media_keys() {
+  step "thinkpad media keys"
+  local file=/etc/udev/hwdb.d/90-thinkpad-media-keys.hwdb
+  local content='evdev:name:ThinkPad Extra Buttons:*
+ KEYBOARD_KEY_46=playpause
+ KEYBOARD_KEY_1320=nextsong
+ KEYBOARD_KEY_45=previoussong'
+  [ "$(cat "$file" 2>/dev/null)" = "$content" ] && return
+  echo "$content" | sudo tee "$file" >/dev/null
+  sudo systemd-hwdb update
+  sudo udevadm trigger --sysname-match='event*'
+}
+
 install_zsh() {
   step "zsh + oh-my-zsh"
   if [ ! -d "$HOME/.oh-my-zsh" ]; then
@@ -510,6 +529,7 @@ setup_auth
 install_dotfiles
 setup_cosmic_panel
 disable_bluetooth_autoenable
+setup_thinkpad_media_keys
 install_zsh
 install_mise
 install_rust
