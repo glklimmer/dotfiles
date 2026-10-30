@@ -77,5 +77,10 @@ function yy() {
 	rm -f -- "$tmp"
 }
 
+# Open files with the default app, detached from the terminal
+function open() {
+	gio open "$@"
+}
+
 # Machine-local config and secrets, not tracked in dotfiles
 [ -f ~/.zshrc.local ] && source ~/.zshrc.local
