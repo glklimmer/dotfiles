@@ -7,7 +7,10 @@
 # feature talk to the running client through ~/.steam, which the flatpak keeps
 # inside its sandbox.
 
-WARPPCS_APT_PACKAGES=(steam-installer clang libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev)
+# xvfb, x11-utils (xwininfo) and mesa-vulkan-drivers (lavapipe) run the game
+# off-screen for scripts/screenshot.sh.
+WARPPCS_APT_PACKAGES=(steam-installer clang libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+  xvfb x11-utils mesa-vulkan-drivers)
 
 WARPPCS_FLATPAKS=(com.discordapp.Discord)
 
