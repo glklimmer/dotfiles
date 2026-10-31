@@ -31,5 +31,6 @@
   "awaySummaryEnabled": false,
   "autoMemoryEnabled": false,
   "theme": "auto",
-  "editorMode": "vim"
+  "editorMode": "vim",
+  "skipWorkflowUsageWarning": true
 }
