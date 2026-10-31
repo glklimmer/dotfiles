@@ -67,8 +67,9 @@ scan() {
   local target=(-a)
   [ -n "$SESSION" ] && target=(-t "$SESSION")
   tmux list-windows "${target[@]}" \
-    -F '#{pane_current_path}'$'\t''#{?automatic-rename,,#{window_name}}' 2>/dev/null |
+    -F '#{?@pp_root,,#{pane_current_path}}'$'\t''#{?automatic-rename,,#{window_name}}' 2>/dev/null |
     while IFS=$'\t' read -r path name; do
+      [ -n "$path" ] || continue
       scan_path "$path" "$name"
     done
 }

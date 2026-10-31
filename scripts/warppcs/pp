@@ -3,40 +3,52 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<EOF
-Usage: $(basename "$0") [players]
+Usage: $(basename "$0") [-t <pane>] [players]
 
-Replaces every other pane in the current tmux window with a warppcs test run of
-<players> players (2-9, default 2): the host on the top half, since it plays
-too, and the remaining players as clients side by side on the bottom half. Run
-it from the warppcs checkout.
+Replaces every other pane in the window of <pane> (default: the current pane)
+with a warppcs test run of <players> players (2-9, default 2): the host on the
+top half of <pane>, since it plays too, and the remaining players as clients
+side by side on the bottom half. All panes run in <pane>'s directory, so run it
+from the warppcs checkout or worktree to test. A failing run rings the bell, so
+a broken build gets flagged even when the window is in the background.
 EOF
   exit 1
 }
-
-PLAYERS="${1:-2}"
-[[ "$PLAYERS" =~ ^[2-9]$ ]] && [ $# -le 1 ] || usage
-CLIENTS=$((PLAYERS - 1))
 
 if [ -z "${TMUX:-}" ]; then
   echo "Error: must be run inside a tmux session." >&2
   exit 1
 fi
 
-server="$(tmux display-message -p '#{pane_id}')"
+server="${TMUX_PANE:-}"
+while getopts ":t:h" opt; do
+  case "$opt" in
+    t) server="$OPTARG" ;;
+    *) usage ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+PLAYERS="${1:-2}"
+[[ "$PLAYERS" =~ ^[2-9]$ ]] && [ $# -le 1 ] || usage
+CLIENTS=$((PLAYERS - 1))
+
+server="$(tmux display-message -p -t "$server" '#{pane_id}')"
+dir="$(tmux display-message -p -t "$server" '#{pane_current_path}')"
 tmux kill-pane -a -t "$server"
 tmux send-keys -t "$server" C-c 'reset' C-m
 
-clients=("$(tmux split-window -v -P -F '#{pane_id}' -t "$server")")
+clients=("$(tmux split-window -v -d -P -F '#{pane_id}' -c "$dir" -t "$server")")
 for _ in $(seq 2 "$CLIENTS"); do
-  clients+=("$(tmux split-window -h -P -F '#{pane_id}' -t "${clients[-1]}")")
+  clients+=("$(tmux split-window -h -d -P -F '#{pane_id}' -c "$dir" -t "${clients[-1]}")")
 done
 
-width=$(($(tmux display-message -p '#{window_width}') / CLIENTS))
+width=$(($(tmux display-message -p -t "$server" '#{window_width}') / CLIENTS))
 for pane in "${clients[@]::${#clients[@]}-1}"; do
   tmux resize-pane -t "$pane" -x "$width"
 done
 
-tmux send-keys -t "$server" ' cargo run -p client -- server' C-m
+tmux send-keys -t "$server" " cargo run -p client -- server || printf '\a'" C-m
 for pane in "${clients[@]}"; do
-  tmux send-keys -t "$pane" ' cargo run -p client' C-m
+  tmux send-keys -t "$pane" " cargo run -p client || printf '\a'" C-m
 done

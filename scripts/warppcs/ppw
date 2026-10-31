@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat >&2 <<EOF
+Usage: $(basename "$0") -s <pane> [players]
+
+Runs pp for the warppcs checkout or worktree of <pane> in a background test
+window, so the build and its logs stay out of the way. The window is opened
+right after <pane>'s window and named after it with a "▶" suffix. Each checkout
+has at most one test window: running again restarts pp there, replacing the
+previous run and its logs. Bound to prefix + t in tmux.
+EOF
+  exit 1
+}
+
+SOURCE=""
+while getopts ":s:h" opt; do
+  case "$opt" in
+    s) SOURCE="$OPTARG" ;;
+    *) usage ;;
+  esac
+done
+shift $((OPTIND - 1))
+[ -n "$SOURCE" ] && [ $# -le 1 ] || usage
+PLAYERS="${1:-2}"
+
+path="$(tmux display-message -p -t "$SOURCE" '#{pane_current_path}')"
+if ! root="$(git -C "$path" rev-parse --show-toplevel 2>/dev/null)"; then
+  tmux display-message "ppw: $path is not a git checkout"
+  exit 1
+fi
+
+session="$(tmux display-message -p -t "$SOURCE" '#{session_id}')"
+window="$(tmux list-windows -t "$session" -F '#{window_id} #{@pp_root}' |
+  awk -v r="$root" 'substr($0, index($0, " ") + 1) == r { print $1; exit }')"
+
+if [ -z "$window" ]; then
+  name="$(tmux display-message -p -t "$SOURCE" '#{window_name}')▶"
+  source_window="$(tmux display-message -p -t "$SOURCE" '#{window_id}')"
+  window="$(tmux new-window -a -d -t "$source_window" -c "$root" -n "$name" -P -F '#{window_id}')"
+  tmux set-option -w -t "$window" @pp_root "$root"
+  tmux set-option -w -t "$window" automatic-rename off
+fi
+
+pane="$(tmux list-panes -t "$window" -F '#{pane_id}' | head -n 1)"
+tmux respawn-pane -k -t "$pane" -c "$root"
+"$(dirname "$0")/pp" -t "$pane" "$PLAYERS"
