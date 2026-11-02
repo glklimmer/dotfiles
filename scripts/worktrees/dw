@@ -7,7 +7,8 @@ Usage: $(basename "$0")
 
 Done with a worktree: run inside an nt window after quitting claude. Removes
 the worktree this shell stands in through its repo's own cleanup
-(pan.do code:cleanup for dental, bin/ws cleanup for dhc, git worktree remove
+(pan.do code:cleanup for dental, bin/ws cleanup --force for dhc,
+so branches still waiting on auto-merge go too; git worktree remove
 for warppcs) and closes the tmux window once that succeeds. On failure the
 window stays open with the error.
 EOF
@@ -38,7 +39,7 @@ case "$common" in
     (cd "$main" && script/pan.do code:cleanup "$top")
     ;;
   "$HOME/denteo/dhc/.git")
-    bin/ws cleanup
+    bin/ws cleanup --force
     ;;
   "$HOME/development/warppcs/.git")
     branch=$(git branch --show-current)
