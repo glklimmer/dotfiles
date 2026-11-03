@@ -127,8 +127,22 @@ choose_profiles() {
   echo "Profiles: ${ACTIVE_PROFILES[*]:-none} (stored in $PROFILES_FILE)"
 }
 
+# GitHub's own apt repo: Ubuntu's gh lags far behind and breaks against the
+# current GitHub API (e.g. `gh pr edit` still queries classic Projects).
+add_github_cli_repo() {
+  local keyring=/etc/apt/keyrings/githubcli-archive-keyring.gpg
+  local list=/etc/apt/sources.list.d/github-cli.list
+  [ -f "$list" ] && return
+  sudo mkdir -p -m 755 /etc/apt/keyrings
+  curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee "$keyring" >/dev/null
+  sudo chmod go+r "$keyring"
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=$keyring] https://cli.github.com/packages stable main" |
+    sudo tee "$list" >/dev/null
+}
+
 install_apt_packages() {
   step "apt packages"
+  add_github_cli_repo
   sudo apt-get update
   sudo apt-get install -y "${APT_PACKAGES[@]}"
   if dpkg -l 'libreoffice*' 2>/dev/null | grep -q '^ii'; then
