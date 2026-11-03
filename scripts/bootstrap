@@ -191,13 +191,22 @@ setup_cosmic_panel() {
 }
 
 ##
-# Keeps Bluetooth controllers powered off when bluetoothd starts, so the
-# machine boots with Bluetooth off until it is switched on in the panel.
+# Keeps Bluetooth off at boot until it is switched on in the panel.
+#
+# AutoEnable=false stops bluetoothd from powering controllers when it starts.
 # BlueZ 5.72 reads no drop-in directory, so main.conf itself is edited.
+#
+# bluetoothd still powers a controller whenever its rfkill block is lifted,
+# and on ThinkPads thinkpad_acpi reports its radio switch (SW_RFKILL_ALL) as
+# on shortly after login. The kernel's default master_switch_mode=2 answers
+# that by unblocking every radio, which turns Bluetooth back on after it was
+# switched off in the panel. Mode 0 leaves rfkill state to userspace.
 disable_bluetooth_autoenable() {
   step "bluetooth off at boot"
-  grep -qx 'AutoEnable=false' /etc/bluetooth/main.conf && return
-  sudo sed -i 's/^#\?AutoEnable=.*/AutoEnable=false/' /etc/bluetooth/main.conf
+  grep -qx 'AutoEnable=false' /etc/bluetooth/main.conf ||
+    sudo sed -i 's/^#\?AutoEnable=.*/AutoEnable=false/' /etc/bluetooth/main.conf
+  grep -qw 'rfkill.master_switch_mode=0' /etc/kernelstub/configuration ||
+    sudo kernelstub -a rfkill.master_switch_mode=0
 }
 
 ##
