@@ -71,6 +71,18 @@ warppcs_aseprite() {
   NEXT_STEPS+=("confirm the Aseprite install in Steam, then re-run bootstrap to set up its launcher")
 }
 
+##
+# Points every worktree under .claude/worktrees at the main checkout's target
+# dir as its cargo build-dir, so dylibs sccache cannot cache, such as
+# bevy_dylib, are built once for all worktrees. ~/scripts/warppcs/cargo keeps
+# that shared dir from serving one worktree's crates to another.
+warppcs_shared_build_dir() {
+  local config="$WARPPCS_DIR/.claude/worktrees/.cargo/config.toml"
+  [ -f "$config" ] && return
+  mkdir -p "$(dirname "$config")"
+  printf '[build]\nbuild-dir = "%s/target"\n' "$WARPPCS_DIR" >"$config"
+}
+
 setup_warppcs() {
   step "warppcs"
   if ! dpkg --print-foreign-architectures | grep -qx i386; then
@@ -81,5 +93,6 @@ setup_warppcs() {
   install_flatpaks "${WARPPCS_FLATPAKS[@]}"
   mkdir -p "$(dirname "$WARPPCS_DIR")"
   [ -d "$WARPPCS_DIR" ] || git clone git@github.com:glklimmer/warppcs.git "$WARPPCS_DIR"
+  warppcs_shared_build_dir
   warppcs_aseprite
 }
