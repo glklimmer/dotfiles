@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+#
+# cargo shim for warppcs checkouts that share one build dir.
+#
+# Every warppcs worktree builds into the main checkout's target dir (set by
+# build-dir in .claude/worktrees/.cargo/config.toml), so sccache-uncacheable
+# artifacts such as bevy_dylib are built once. Cargo names a workspace crate's
+# artifacts the same in every worktree and judges freshness by mtime, so after
+# another worktree built a crate, sources older than that build count as fresh
+# and the other worktree's artifacts get linked. Before running the real cargo,
+# this shim notices when the last build came from a different checkout and
+# touches every file that may differ between the two, forcing cargo to rebuild
+# the affected crates.
+#
+# Outside warppcs it only execs the real cargo. Two checkouts building at the
+# same moment can still race, since holding a lock across the build would also
+# block the concurrent `cargo run` panes of pp.
+
+set -euo pipefail
+
+MAIN="$HOME/development/warppcs"
+
+# Prints the first cargo on PATH that is not this script.
+real_cargo() {
+  local self dir
+  self="$(realpath "$0")"
+  IFS=: read -ra dirs <<<"$PATH"
+  for dir in "${dirs[@]}"; do
+    if [ -x "$dir/cargo" ] && [ "$(realpath "$dir/cargo")" != "$self" ]; then
+      echo "$dir/cargo"
+      return
+    fi
+  done
+  echo "cargo shim: no real cargo on PATH" >&2
+  exit 127
+}
+
+# NUL-separated paths of $1's uncommitted changes: staged, unstaged and
+# untracked files, relative to the checkout root.
+dirty_files() {
+  git -C "$1" diff -z --name-only HEAD
+  git -C "$1" ls-files -z --others --exclude-standard
+}
+
+# Touches, relative to checkout $1, every file that may differ from what the
+# checkout recorded in marker $2 built: the diff between both commits plus
+# both sides' uncommitted files. Touches every tracked file when the recorded
+# commit is gone or nothing was recorded yet.
+touch_changed() {
+  local root="$1" marker="$2" prev_head=""
+  [ -f "$marker" ] && prev_head="$(sed -n 2p "$marker")"
+  {
+    if [ -n "$prev_head" ] && git -C "$root" cat-file -e "$prev_head^{commit}" 2>/dev/null; then
+      git -C "$root" diff -z --name-only "$prev_head" HEAD
+      tail -n +3 "$marker" | tr '\n' '\0'
+      dirty_files "$root"
+    else
+      git -C "$root" ls-files -z
+    fi
+  } | (cd "$root" && xargs -0 -r touch -c --)
+}
+
+# Brings the shared build dir in line with the checkout at $1 and records it
+# as the last one to build.
+sync_build_dir() {
+  local root="$1" target="$MAIN/target"
+  local marker="$target/.last-checkout"
+  mkdir -p "$target"
+  exec 9>"$target/.last-checkout.lock"
+  flock 9
+  if [ ! -f "$marker" ] || [ "$(sed -n 1p "$marker")" != "$root" ]; then
+    touch_changed "$root" "$marker"
+  fi
+  {
+    echo "$root"
+    git -C "$root" rev-parse HEAD
+    dirty_files "$root" | tr '\0' '\n'
+  } >"$marker.tmp"
+  mv "$marker.tmp" "$marker"
+  exec 9>&-
+}
+
+CARGO="$(real_cargo)"
+common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+if [ "$common" = "$MAIN/.git" ]; then
+  root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  if [ -n "$root" ]; then
+    sync_build_dir "$root" || echo "cargo shim: could not sync $MAIN/target" >&2
+  fi
+fi
+exec "$CARGO" "$@"
