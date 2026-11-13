@@ -21,7 +21,7 @@ EOF
 APT_PACKAGES=(
   zsh tmux curl unzip p7zip-full build-essential
   ripgrep fd-find fzf jq xclip wl-clipboard htop
-  ffmpegthumbnailer imagemagick poppler-utils
+  ffmpegthumbnailer imagemagick poppler-utils timg
   gh
   # alacritty build deps
   cmake g++ pkg-config libfontconfig1-dev libxcb-xfixes0-dev libxkbcommon-dev python3
@@ -39,6 +39,11 @@ DOCK_PC_PACKAGES=(tigervnc-viewer iw linux-tools-generic)
 WAYVNC_VERSION=v0.10.2
 NEATVNC_VERSION=v1.0.3
 AML_VERSION=v1.0.0
+
+# Alacritty fork with sixel image support, which upstream lacks. tmux passes the
+# images through (terminal-features in tmux.conf), so art previews show in a
+# pane. The fork merges upstream regularly; `cargo install --force` updates it.
+ALACRITTY_GRAPHICS_REPO=https://github.com/ayosec/alacritty
 
 FLATPAKS=(com.google.Chrome com.spotify.Client)
 
@@ -269,7 +274,8 @@ install_rust() {
   # shellcheck source=/dev/null
   . "$HOME/.cargo/env"
   has sccache || RUSTC_WRAPPER= cargo install sccache --locked
-  has alacritty || cargo install alacritty
+  cargo install --list | grep -q "^alacritty .*ayosec/alacritty?branch=graphics" ||
+    cargo install --locked --force --git "$ALACRITTY_GRAPHICS_REPO" --branch graphics alacritty
   install_alacritty_desktop_entry
 }
 
@@ -279,7 +285,7 @@ install_rust() {
 # PATH need not include ~/.cargo/bin.
 install_alacritty_desktop_entry() {
   local src
-  src="$(ls -d "$HOME"/.cargo/registry/src/*/alacritty-[0-9]* 2>/dev/null | sort -V | tail -n1)"
+  src="$(ls -td "$HOME"/.cargo/git/checkouts/alacritty-*/*/ 2>/dev/null | head -n1)"
   [ -n "$src" ] || return 0
   local apps="$HOME/.local/share/applications"
   local icons="$HOME/.local/share/icons/hicolor/scalable/apps"
