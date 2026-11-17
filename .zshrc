@@ -44,6 +44,7 @@ alias cya="shutdown -r 0"
 alias dotfiles="/usr/bin/git --git-dir=$HOME/.dotfiles --work-tree=$HOME" 
 alias ppcassets="cd $HOME/development/warppcs/client/assets/"
 alias ppc="$HOME/development/warppcs/target/release/ppc_console"
+alias loc="tokei"
 
 # Add nvim to PATH
 export PATH="$PATH:/opt/nvim/bin"

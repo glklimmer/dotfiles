@@ -1,6 +1,7 @@
 [tools]
 lazygit = "latest"
 node = "lts"
+"cargo:tokei" = "latest"
 "npm:sentry" = "latest"
 tree-sitter = "latest"
 yazi = "latest"
