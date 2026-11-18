@@ -49,7 +49,7 @@ alias loc="tokei"
 # Add nvim to PATH
 export PATH="$PATH:/opt/nvim/bin"
 
-# sccache: shared compile cache across worktrees (wired in ~/.cargo/config.toml)
+# sccache: kache's fallback for compiles kache passes through (cache.fallback in ~/.config/kache/config.toml)
 export SCCACHE_CACHE_SIZE=40G
 
 # Set editor
