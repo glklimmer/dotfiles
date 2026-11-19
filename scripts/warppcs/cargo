@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+#
+# cargo shim that runs `cargo test` for warppcs checkouts on the PC while the
+# laptop is docked (see ~/scripts/dock/dock), so test builds leave the
+# laptop's CPU to the playtest and `cargo check`.
+#
+# The checkout, uncommitted and untracked files included, is mirrored with
+# rsync to ~/Development/warppcs-tests/<worktree> on the PC, minus .git and
+# everything .gitignore excludes, and the tests run there under kache. Output
+# streams back with the PC's paths rewritten to the laptop's, and the exit
+# status is the remote cargo's. Mirrors of worktrees that no longer exist
+# locally are removed on each run.
+#
+# Every other cargo command, any repo but warppcs, an undocked laptop and
+# WARPPCS_LOCAL_TESTS=1 run the real cargo locally. A dock connection that
+# drops before the tests start also falls back to a local run.
+
+set -euo pipefail
+
+MAIN="$HOME/development/warppcs"
+DOCK_SOCK="${XDG_RUNTIME_DIR:-/run/user/$UID}/dock/ssh.sock"
+REMOTE_ROOT="Development/warppcs-tests"
+
+# Prints the first cargo on PATH that is not this script.
+real_cargo() {
+  local self dir
+  self="$(realpath "$0")"
+  IFS=: read -ra dirs <<<"$PATH"
+  for dir in "${dirs[@]}"; do
+    if [ -x "$dir/cargo" ] && [ "$(realpath "$dir/cargo")" != "$self" ]; then
+      echo "$dir/cargo"
+      return
+    fi
+  done
+  echo "cargo shim: no real cargo on PATH" >&2
+  exit 127
+}
+
+CARGO="$(real_cargo)"
+
+run_local() { exec "$CARGO" "$@"; }
+
+# True when the arguments are `cargo [+toolchain] test|t ...`.
+is_test() {
+  local first="${1:-}"
+  [[ "$first" == +* ]] && first="${2:-}"
+  [ "$first" = test ] || [ "$first" = t ]
+}
+
+docked() {
+  [ -n "${DOCK_HOST:-}" ] && [ -S "$DOCK_SOCK" ] &&
+    ssh -S "$DOCK_SOCK" -O check "$DOCK_HOST" 2>/dev/null
+}
+
+[ -z "${WARPPCS_LOCAL_TESTS:-}" ] || run_local "$@"
+is_test "$@" || run_local "$@"
+common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+[ "$common" = "$MAIN/.git" ] || run_local "$@"
+docked || run_local "$@"
+
+root="$(git rev-parse --show-toplevel)"
+name="$(basename "$root")"
+[ "$root" = "$MAIN" ] && name=main
+remote_dir="$REMOTE_ROOT/$name"
+pc() { ssh -S "$DOCK_SOCK" "$DOCK_HOST" "$@"; }
+
+keep="main"
+while read -r key path; do
+  [ "$key" = worktree ] && [ "$path" != "$MAIN" ] && keep="$keep $(basename "$path")"
+done < <(git -C "$MAIN" worktree list --porcelain)
+
+if ! pc "mkdir -p '$remote_dir' && cd '$REMOTE_ROOT' && for d in */; do case \" $keep \" in *\" \${d%/} \"*) ;; *) rm -rf \"\$d\" ;; esac; done" ||
+  ! rsync -a --delete -e "ssh -S '$DOCK_SOCK'" \
+    --exclude=/.git --exclude=/target --filter=':- .gitignore' \
+    "$root/" "$DOCK_HOST:$remote_dir/"; then
+  echo "cargo shim: could not reach the PC, testing locally" >&2
+  run_local "$@"
+fi
+
+echo "cargo shim: running tests on the PC ($DOCK_HOST); WARPPCS_LOCAL_TESTS=1 runs them here" >&2
+args="$(printf '%q ' "$@")"
+color=never
+tty=-T
+if [ -t 1 ]; then
+  color=always
+  tty=-t
+fi
+remote_abs="$(pc 'echo $HOME')/$remote_dir"
+set +e
+ssh -S "$DOCK_SOCK" "$tty" "$DOCK_HOST" "cd '$remote_dir' && exec flock .cargo-shim.lock env RUSTC_WRAPPER=\$HOME/.cargo/bin/kache CARGO_TERM_COLOR=$color \$HOME/.cargo/bin/cargo $args" |
+  sed -u "s#$remote_abs#$root#g"
+status=("${PIPESTATUS[@]}")
+set -e
+exit "${status[0]}"

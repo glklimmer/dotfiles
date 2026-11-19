@@ -34,7 +34,11 @@ DOCK_APT_PACKAGES=(
   libjansson-dev libturbojpeg0-dev libgnutls28-dev nettle-dev libgmp-dev zlib1g-dev libpam0g-dev
 )
 
-DOCK_PC_PACKAGES=(tigervnc-viewer iw linux-tools-generic)
+DOCK_PC_PACKAGES=(
+  tigervnc-viewer iw linux-tools-generic
+  # warppcs test runs from ~/scripts/warppcs/cargo
+  rsync clang pkg-config libasound2-dev libudev-dev libwayland-dev
+)
 
 WAYVNC_VERSION=v0.10.2
 NEATVNC_VERSION=v1.0.3
@@ -438,6 +442,21 @@ dock_wifi_powersave_check() {
 }
 
 ##
+# Prepares the PC to run warppcs tests for ~/scripts/warppcs/cargo while
+# docked: rustup, kache with its store on the Development partition beside the
+# test mirrors (so restores can hardlink), and the mirror directory.
+dock_pc_test_runner() {
+  ssh "$1" 'set -e
+mkdir -p ~/Development/warppcs-tests ~/Development/.kache-cache ~/.cache
+[ -e ~/.cache/kache ] || ln -s ~/Development/.kache-cache ~/.cache/kache
+[ -x ~/.cargo/bin/rustup ] || curl -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path
+[ -x ~/.cargo/bin/kache ] || {
+  ~/.cargo/bin/rustup update stable --no-self-update
+  RUSTC_WRAPPER= ~/.cargo/bin/cargo +stable install kache --locked
+}'
+}
+
+##
 # Keeps the PC's onboard card on pro-audio, which WirePlumber remembers once
 # set, and names its two outputs (~/scripts/dock/pc-audio.lua). Normal profiles
 # offer only the headphones or the speakers, which breaks both the dock and the
@@ -509,6 +528,7 @@ setup_dock() {
     return
   fi
   dock_pc_audio "$host"
+  dock_pc_test_runner "$host"
   ssh "$host" "cmp -s - /usr/local/sbin/dock-usb && test -f /etc/sudoers.d/dock-usb &&
     nmcli -t -f NAME connection show | grep -qx dock && $(dock_wifi_powersave_check)" <"$HOME/scripts/dock/dock-usb" && return
   scp -q "$HOME/scripts/dock/dock-usb" "$host:/tmp/dock-usb"
