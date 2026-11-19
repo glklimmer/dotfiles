@@ -47,8 +47,10 @@ is_test() {
   [ "$first" = test ] || [ "$first" = t ]
 }
 
+DOCK_HOST="${DOCK_HOST:-$(sed -n 's/^export DOCK_HOST=//p' "$HOME/.zshrc.local" 2>/dev/null)}"
+
 docked() {
-  [ -n "${DOCK_HOST:-}" ] && [ -S "$DOCK_SOCK" ] &&
+  [ -n "$DOCK_HOST" ] && [ -S "$DOCK_SOCK" ] &&
     ssh -S "$DOCK_SOCK" -O check "$DOCK_HOST" 2>/dev/null
 }
 
