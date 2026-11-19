@@ -9,7 +9,9 @@
 # everything .gitignore excludes, and the tests run there under kache. Output
 # streams back with the PC's paths rewritten to the laptop's, and the exit
 # status is the remote cargo's. Mirrors of worktrees that no longer exist
-# locally are removed on each run.
+# locally are removed on each run. While the PC has less than MIN_FREE_GIB
+# free, the target dirs of the least recently tested mirrors are deleted,
+# skipping any whose tests are running; they rebuild from kache when next used.
 #
 # Every other cargo command, any repo but warppcs, an undocked laptop and
 # WARPPCS_LOCAL_TESTS=1 run the real cargo locally. A dock connection that
@@ -20,6 +22,7 @@ set -euo pipefail
 MAIN="$HOME/development/warppcs"
 DOCK_SOCK="${XDG_RUNTIME_DIR:-/run/user/$UID}/dock/ssh.sock"
 REMOTE_ROOT="Development/warppcs-tests"
+MIN_FREE_GIB=40
 
 # Prints the first cargo on PATH that is not this script.
 real_cargo() {
@@ -71,7 +74,33 @@ while read -r key path; do
   [ "$key" = worktree ] && [ "$path" != "$MAIN" ] && keep="$keep $(basename "$path")"
 done < <(git -C "$MAIN" worktree list --porcelain)
 
-if ! pc "mkdir -p '$remote_dir' && cd '$REMOTE_ROOT' && for d in */; do case \" $keep \" in *\" \${d%/} \"*) ;; *) rm -rf \"\$d\" ;; esac; done" ||
+# Runs on the PC with the mirror root, this mirror's name, the free-space floor
+# in GiB and the names of every live worktree: drops dead mirrors, stamps this
+# one as just used and frees space from the least recently used targets.
+prepare_pc() {
+  pc "bash -s -- $(printf '%q ' "$REMOTE_ROOT" "$name" "$MIN_FREE_GIB" "$keep")" <<'EOF'
+set -e
+cd ~/"$1"
+mkdir -p "$2"
+for d in */; do
+  d="${d%/}"
+  case " $4 " in *" $d "*) ;; *) rm -rf "$d" ;; esac
+done
+for d in */; do
+  [ -e "$d.last-run" ] || touch -d @0 "$d.last-run"
+done
+touch "$2/.last-run"
+floor=$(($3 * 1024 * 1024))
+for stamp in $(ls -1tr */.last-run 2>/dev/null); do
+  [ "$(df --output=avail -k . | tail -1)" -ge "$floor" ] && break
+  d="${stamp%/.last-run}"
+  { [ "$d" = "$2" ] || [ ! -d "$d/target" ]; } && continue
+  flock -n "$d/.cargo-shim.lock" rm -rf "$d/target" || true
+done
+EOF
+}
+
+if ! prepare_pc ||
   ! rsync -a --delete -e "ssh -S '$DOCK_SOCK'" \
     --exclude=/.git --exclude=/target --filter=':- .gitignore' \
     "$root/" "$DOCK_HOST:$remote_dir/"; then
