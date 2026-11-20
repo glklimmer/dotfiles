@@ -25,6 +25,9 @@ APT_PACKAGES=(
   gh
   # alacritty build deps
   cmake g++ pkg-config libfontconfig1-dev libxcb-xfixes0-dev libxkbcommon-dev python3
+  # cosmic-comp build deps
+  libegl1-mesa-dev libgbm-dev libinput-dev libpixman-1-dev libseat-dev libsystemd-dev
+  libudev-dev libwayland-dev libxcb1-dev libdisplay-info-dev
 )
 
 DOCK_APT_PACKAGES=(
@@ -48,6 +51,10 @@ AML_VERSION=v1.0.0
 # images through (terminal-features in tmux.conf), so art previews show in a
 # pane. The fork merges upstream regularly; `cargo install --force` updates it.
 ALACRITTY_GRAPHICS_REPO=https://github.com/ayosec/alacritty
+
+# Upstream pull request merged into the cosmic-comp build (install_cosmic_comp).
+COSMIC_COMP_PR=2755
+COSMIC_COMP_DIR="$HOME/development/cosmic-comp"
 
 FLATPAKS=(com.google.Chrome com.spotify.Client)
 
@@ -283,6 +290,45 @@ install_rust() {
   cargo install --list | grep -q "^alacritty .*ayosec/alacritty?branch=graphics" ||
     cargo install --locked --force --git "$ALACRITTY_GRAPHICS_REPO" --branch graphics alacritty
   install_alacritty_desktop_entry
+}
+
+##
+# Runs cosmic-comp with upstream PR #COSMIC_COMP_PR merged, so directional
+# focus and window moves at a screen edge reach the adjacent display rather
+# than switching workspace.
+#
+# The build starts from the exact upstream commit of the installed cosmic-comp
+# package (its version ends in that commit's short hash), so the compositor
+# matches the rest of the COSMIC release apt installed. A dpkg diversion sends
+# the packaged binary to /usr/bin/cosmic-comp.distrib, which keeps apt upgrades
+# from overwriting the custom build. The stamp records the package commit and PR
+# head the installed build came from, so re-running bootstrap after an apt
+# upgrade that bumps cosmic-comp rebuilds against the new package commit, and
+# skips otherwise. A merge conflict stops the script with the merge left in
+# progress in the checkout.
+install_cosmic_comp() {
+  step "cosmic-comp + PR #$COSMIC_COMP_PR"
+  local stamp="$HOME/.local/state/cosmic-comp-build" base pr
+  base="$(dpkg-query -W -f='${Version}' cosmic-comp)"
+  base="${base##*~}"
+  [ -d "$COSMIC_COMP_DIR" ] ||
+    git clone -q https://github.com/pop-os/cosmic-comp.git "$COSMIC_COMP_DIR"
+  git -C "$COSMIC_COMP_DIR" fetch -q origin
+  git -C "$COSMIC_COMP_DIR" fetch -q origin "pull/$COSMIC_COMP_PR/head"
+  pr="$(git -C "$COSMIC_COMP_DIR" rev-parse FETCH_HEAD)"
+  if [ "$(cat "$stamp" 2>/dev/null)" = "$base $pr" ] &&
+    dpkg-divert --list /usr/bin/cosmic-comp | grep -q .; then
+    return
+  fi
+  git -C "$COSMIC_COMP_DIR" switch -q -C "build/pkg-$base-plus-$COSMIC_COMP_PR" "$base"
+  git -C "$COSMIC_COMP_DIR" merge -q --no-edit "$pr"
+  (cd "$COSMIC_COMP_DIR" && cargo build --release)
+  dpkg-divert --list /usr/bin/cosmic-comp | grep -q . ||
+    sudo dpkg-divert --local --rename --divert /usr/bin/cosmic-comp.distrib --add /usr/bin/cosmic-comp
+  sudo install -m 755 "$COSMIC_COMP_DIR/target/release/cosmic-comp" /usr/bin/cosmic-comp
+  mkdir -p "$(dirname "$stamp")"
+  echo "$base $pr" >"$stamp"
+  NEXT_STEPS+=("log out and back in (rebuilt cosmic-comp)")
 }
 
 # `cargo install` ships only the binary, so the launcher shows the window as
@@ -584,6 +630,7 @@ setup_thinkpad_media_keys
 install_zsh
 install_mise
 install_rust
+install_cosmic_comp
 install_neovim
 install_tmux_plugins
 step "flatpaks"
