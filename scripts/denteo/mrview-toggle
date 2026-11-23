@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat >&2 <<EOF
+Usage: $(basename "$0") -s <pane>
+
+Closes the mrview pane of <pane>'s window, or opens one on the left half of the
+window in <pane>'s directory when there is none. Bound to prefix + m in tmux.
+EOF
+  exit 1
+}
+
+SOURCE=""
+while getopts ":s:h" opt; do
+  case "$opt" in
+    s) SOURCE="$OPTARG" ;;
+    *) usage ;;
+  esac
+done
+shift $((OPTIND - 1))
+[ -n "$SOURCE" ] && [ $# -eq 0 ] || usage
+
+MRVIEW="$(command -v mrview || echo "$HOME/.cargo/bin/mrview")"
+if [ ! -x "$MRVIEW" ]; then
+  tmux display-message "mrview-toggle: mrview is not installed"
+  exit 1
+fi
+
+window="$(tmux display-message -p -t "$SOURCE" '#{window_id}')"
+open="$(tmux list-panes -t "$window" -F '#{pane_id} #{pane_current_command}' |
+  awk '$2 == "mrview" { print $1; exit }')"
+
+if [ -n "$open" ]; then
+  tmux kill-pane -t "$open"
+else
+  path="$(tmux display-message -p -t "$SOURCE" '#{pane_current_path}')"
+  tmux split-window -d -hb -l 50% -t "$SOURCE" -c "$path" "$MRVIEW"
+fi
