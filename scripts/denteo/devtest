@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat >&2 <<EOF
+Usage: $(basename "$0") -s <pane>
+
+Opens the dental checkout or worktree of <pane> for testing. Unless something
+already serves its port, bin/dev starts in a 5-row pane above the window's
+claude pane (or its first pane besides mrview); a second run while it
+boots waits for that pane instead of starting another. Once the port answers,
+the app opens in a new Firefox tab: http://<DENTEO_SUBDOMAIN>.localhost:<PORT>
+from the worktree's .env.development.local, or http://localhost:3000 in the
+main checkout. Bound to prefix + t in tmux for dental panes.
+EOF
+  exit 1
+}
+
+SOURCE=""
+while getopts ":s:h" opt; do
+  case "$opt" in
+    s) SOURCE="$OPTARG" ;;
+    *) usage ;;
+  esac
+done
+shift $((OPTIND - 1))
+[ -n "$SOURCE" ] && [ $# -eq 0 ] || usage
+
+BOOT_TIMEOUT=180
+
+path="$(tmux display-message -p -t "$SOURCE" '#{pane_current_path}')"
+if ! root="$(git -C "$path" rev-parse --show-toplevel 2>/dev/null)"; then
+  tmux display-message "devtest: $path is not a git checkout"
+  exit 1
+fi
+
+env_value() {
+  sed -n "s/^$1=//p" "$root/.env.development.local" 2>/dev/null | tail -n 1 | tr -d "\"'"
+}
+
+port="$(env_value PORT)"
+port="${port:-3000}"
+subdomain="$(env_value DENTEO_SUBDOMAIN)"
+url="http://${subdomain:+$subdomain.}localhost:$port"
+
+listening() {
+  ss -ltnH "sport = :$port" | grep -q .
+}
+
+if ! listening; then
+  window="$(tmux display-message -p -t "$SOURCE" '#{window_id}')"
+  dev_pane="$(tmux list-panes -t "$window" -F '#{pane_id} #{@dev_root}' |
+    awk -v r="$root" 'substr($0, index($0, " ") + 1) == r { print $1; exit }')"
+  if [ -z "$dev_pane" ]; then
+    target="$(tmux list-panes -t "$window" -F '#{pane_id} #{pane_current_command}' |
+      awk '$2 == "claude" { print $1; found = 1; exit }
+           $2 != "mrview" && !other { other = $1 }
+           END { if (!found && other) print other }')"
+    dev_pane="$(tmux split-window -d -v -b -l 5 -t "${target:-$SOURCE}" -c "$root" \
+      -P -F '#{pane_id}' "zsh -ic 'bin/dev; exec zsh'")"
+    tmux set-option -p -t "$dev_pane" @dev_root "$root"
+  fi
+  tmux display-message "devtest: waiting for $url"
+  for _ in $(seq "$BOOT_TIMEOUT"); do
+    listening && break
+    sleep 1
+  done
+  if ! listening; then
+    tmux display-message "devtest: nothing listens on port $port after ${BOOT_TIMEOUT}s"
+    exit 1
+  fi
+fi
+
+firefox --new-tab "$url" >/dev/null 2>&1 &
