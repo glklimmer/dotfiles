@@ -23,8 +23,13 @@ fi
 cd ~/denteo/dental
 tmux send-keys ' cd ~/denteo/dental' C-m
 
-# Split the window vertically: 30% shell on the left, 70% claude on the right
-CLAUDE_PANE=$(tmux split-window -h -l 70% -P -F '#{pane_id}')
+# Split the window into shell 15%, mrview 35% (todos and open merge requests)
+# and claude 50%. mrview splits the shell's half, so without it the shell keeps
+# the left half.
+CLAUDE_PANE=$(tmux split-window -h -l 50% -P -F '#{pane_id}')
+if MRVIEW=$(command -v mrview); then
+  tmux split-window -d -h -l 70% -t "$TMUX_PANE" -c ~/denteo/dental "$MRVIEW"
+fi
 
 # Run claude in the new pane
 tmux send-keys -t "$CLAUDE_PANE" ' claude' C-m

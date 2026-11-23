@@ -61,6 +61,18 @@ denteo_tridactyl_login() {
   printf 'command login js -d€ -r login.js€ %s\n' "$password" >>"$rc"
 }
 
+##
+# Installs mrview, the tmux pane nt and denteo open beside each window, from its
+# checkout in ~/denteo/mrview, which has no remote to clone it from.
+denteo_mrview() {
+  has mrview && return
+  if [ -d "$HOME/denteo/mrview" ]; then
+    cargo install --locked --path "$HOME/denteo/mrview"
+  else
+    NEXT_STEPS+=("copy ~/denteo/mrview over and run cargo install --path ~/denteo/mrview")
+  fi
+}
+
 setup_denteo() {
   step "denteo"
   sudo apt-get install -y "${DENTEO_APT_PACKAGES[@]}"
@@ -91,5 +103,6 @@ setup_denteo() {
       "$HOME/.local/bin/mise" exec -- bunx playwright install --with-deps chromium
     )
   fi
+  denteo_mrview
   NEXT_STEPS+=("run bin/setup in ~/denteo/dental")
 }
