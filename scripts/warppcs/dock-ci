@@ -79,14 +79,29 @@ off() {
   echo "dock-ci: cancelled run(s) ${runs[*]}; they re-run on GitHub's runners once stopped (log: $LOG)"
 }
 
+##
+# Re-runs the failed and cancelled jobs of each given run as soon as that run
+# has stopped, independently of the others: a job the stopped runner was in
+# the middle of keeps its run going until GitHub gives up on the runner, which
+# takes minutes.
 requeue() {
-  local run deadline=$((SECONDS + REQUEUE_TIMEOUT))
-  for run in "$@"; do
-    until [ "$(gh run view "$run" --repo "$REPO" --json status -q .status)" = completed ]; do
-      [ "$SECONDS" -lt "$deadline" ] || { echo "$(date -Is) run $run did not stop; not re-run"; continue 2; }
-      sleep 10
+  local pending=("$@") waiting run deadline=$((SECONDS + REQUEUE_TIMEOUT))
+  while [ "${#pending[@]}" -gt 0 ]; do
+    waiting=()
+    for run in "${pending[@]}"; do
+      if [ "$(gh run view "$run" --repo "$REPO" --json status -q .status 2>/dev/null)" = completed ]; then
+        gh run rerun "$run" --repo "$REPO" --failed && echo "$(date -Is) re-ran run $run"
+      else
+        waiting+=("$run")
+      fi
     done
-    gh run rerun "$run" --repo "$REPO" --failed && echo "$(date -Is) re-ran run $run"
+    pending=("${waiting[@]}")
+    [ "${#pending[@]}" -gt 0 ] || break
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      echo "$(date -Is) run(s) ${pending[*]} did not stop; not re-run"
+      break
+    fi
+    sleep 10
   done
 }
 
