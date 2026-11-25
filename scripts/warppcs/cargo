@@ -5,8 +5,10 @@
 # laptop's CPU to the playtest and `cargo check`.
 #
 # The checkout, uncommitted and untracked files included, is mirrored with
-# rsync to ~/Development/warppcs-tests/<worktree> on the PC, minus .git and
-# everything .gitignore excludes, and the tests run there under kache. Output
+# rsync to ~/Development/warppcs-tests/<worktree> on the PC, minus .git,
+# everything .gitignore and .git/info/exclude exclude, and any Cargo target dir
+# (a directory holding CACHEDIR.TAG) within two levels of the root, such as a
+# second target dir an agent built into; the tests run there under kache. Output
 # streams back with the PC's paths rewritten to the laptop's, and the exit
 # status is the remote cargo's. Mirrors of worktrees that no longer exist
 # locally are removed on each run. While the PC has less than MIN_FREE_GIB
@@ -100,9 +102,15 @@ done
 EOF
 }
 
+excludes=(--exclude=/.git --exclude=/target --filter=':- .gitignore')
+info_exclude="$(git rev-parse --path-format=absolute --git-path info/exclude)"
+[ -f "$info_exclude" ] && excludes+=(--exclude-from="$info_exclude")
+while read -r tag; do
+  excludes+=(--exclude="/${tag%/CACHEDIR.TAG}/")
+done < <(find "$root" -mindepth 2 -maxdepth 3 -name .git -prune -o -name CACHEDIR.TAG -printf '%P\n')
+
 if ! prepare_pc ||
-  ! rsync -a --delete -e "ssh -S '$DOCK_SOCK'" \
-    --exclude=/.git --exclude=/target --filter=':- .gitignore' \
+  ! rsync -a --delete -e "ssh -S '$DOCK_SOCK'" "${excludes[@]}" \
     "$root/" "$DOCK_HOST:$remote_dir/"; then
   echo "cargo shim: could not reach the PC, testing locally" >&2
   run_local "$@"
