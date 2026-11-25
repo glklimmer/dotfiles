@@ -41,6 +41,8 @@ DOCK_PC_PACKAGES=(
   tigervnc-viewer iw linux-tools-generic
   # warppcs test runs from ~/scripts/warppcs/cargo
   rsync clang pkg-config libasound2-dev libudev-dev libwayland-dev
+  # warppcs releases on the CI runner: llvm-lib for cargo-xwin, 32-bit libs for steamcmd
+  llvm zip unzip lib32gcc-s1 lib32stdc++6
 )
 
 WAYVNC_VERSION=v0.10.2
@@ -503,6 +505,58 @@ mkdir -p ~/Development/warppcs-tests ~/Development/.kache-cache ~/.cache
 }
 
 ##
+# Registers a GitHub Actions runner for glklimmer/warppcs on the PC, labelled
+# "dock-<github login>", as the user service warppcs-runner that ~/scripts/warppcs/dock-ci
+# starts and stops with the dock. The service is never enabled, so the runner
+# only takes jobs while docked. Jobs build under kache into one persistent
+# target dir on the Development partition, and releases cross-compile with
+# cargo-xwin, whose MSVC SDK cache lives there too. The runner updates itself, so only a
+# missing one is downloaded. Lingering keeps the user manager, and with it the
+# runner, alive without a login session.
+dock_pc_ci_runner() {
+  local host="$1" repo=glklimmer/warppcs version token login
+  if ! ssh "$host" 'test -f ~/Development/actions-runner/.runner'; then
+    version="$(gh api repos/actions/runner/releases/latest -q .tag_name)"
+    login="$(gh api user -q .login)"
+    login="${login,,}"
+    token="$(gh api -X POST "repos/$repo/actions/runners/registration-token" -q .token)"
+    ssh "$host" "bash -s -- $(printf '%q ' "${version#v}" "$repo" "$token" "$login")" <<'EOF'
+set -e
+mkdir -p ~/Development/actions-runner
+cd ~/Development/actions-runner
+curl -fsSL "https://github.com/actions/runner/releases/download/v$1/actions-runner-linux-x64-$1.tar.gz" | tar xz
+./config.sh --unattended --replace --url "https://github.com/$2" --token "$3" \
+  --name "dock-$4" --labels "dock-$4" --work _work
+EOF
+  fi
+  ssh "$host" 'bash -s' <<'EOF'
+set -e
+cd ~/Development/actions-runner
+[ -x ~/.cargo/bin/cargo-xwin ] || RUSTC_WRAPPER= ~/.cargo/bin/cargo +stable install cargo-xwin --locked
+llvm="$(dirname "$(ls -d /usr/lib/llvm-*/bin/llvm-lib | sort -V | tail -1)")"
+printf '%s\n' "RUSTC_WRAPPER=$HOME/.cargo/bin/kache" \
+  "CARGO_TARGET_DIR=$HOME/Development/actions-runner-target" \
+  "XWIN_CACHE_DIR=$HOME/Development/xwin-cache" >.env
+printf '%s\n' "$HOME/.cargo/bin:$llvm:/usr/local/bin:/usr/bin:/bin" >.path
+mkdir -p ~/.config/systemd/user
+cat >~/.config/systemd/user/warppcs-runner.service <<'UNIT'
+[Unit]
+Description=GitHub Actions runner for warppcs, started by dock
+
+[Service]
+WorkingDirectory=%h/Development/actions-runner
+ExecStart=%h/Development/actions-runner/run.sh
+KillMode=mixed
+KillSignal=SIGINT
+TimeoutStopSec=30
+Nice=10
+UNIT
+systemctl --user daemon-reload
+loginctl show-user "$USER" -p Linger | grep -q yes || loginctl enable-linger
+EOF
+}
+
+##
 # Keeps the PC's onboard card on pro-audio, which WirePlumber remembers once
 # set, and names its two outputs (~/scripts/dock/pc-audio.lua). Normal profiles
 # offer only the headphones or the speakers, which breaks both the dock and the
@@ -575,6 +629,7 @@ setup_dock() {
   fi
   dock_pc_audio "$host"
   dock_pc_test_runner "$host"
+  dock_pc_ci_runner "$host"
   ssh "$host" "cmp -s - /usr/local/sbin/dock-usb && test -f /etc/sudoers.d/dock-usb &&
     nmcli -t -f NAME connection show | grep -qx dock && $(dock_wifi_powersave_check)" <"$HOME/scripts/dock/dock-usb" && return
   scp -q "$HOME/scripts/dock/dock-usb" "$host:/tmp/dock-usb"

@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+#
+# Routes warppcs CI to the PC while the laptop is docked; `dock on` and
+# `dock off` (see ~/scripts/dock/dock) call it.
+#
+#   on   starts the PC's warppcs-runner service (set up by ~/scripts/bootstrap)
+#        and sets the repo variable CI_RUNNER_<LOGIN>, which every CI job of a
+#        run this GitHub user triggers reads as its runs-on, to the runner's
+#        labels
+#   off  deletes that variable, so new jobs go to GitHub's runners again, cancels
+#        every run with a job still waiting for or running on the PC, and once
+#        each has stopped re-runs its failed and cancelled jobs, which then also
+#        land on GitHub's runners. That last part runs detached and logs to
+#        ~/.local/state/dock/ci.log, so `dock off` never waits on it. The
+#        runner itself is stopped by the dock's PC release.
+#
+# The runner's target dir is wiped on `on` once it outgrows MAX_TARGET_GIB;
+# kache refills it.
+#
+# Only the repo owner may write variables. A collaborator sets
+# WARPPCS_CI_VARIABLE_TOKEN to a fine-grained token of the owner limited to
+# this repo's variables; it is used for the variable calls only, everything
+# else runs as the gh login.
+
+set -euo pipefail
+
+REPO=glklimmer/warppcs
+UNIT=warppcs-runner.service
+MAX_TARGET_GIB=40
+REQUEUE_TIMEOUT=1200
+
+DOCK_SOCK="${XDG_RUNTIME_DIR:-/run/user/$UID}/dock/ssh.sock"
+DOCK_HOST="${DOCK_HOST:-$(sed -n 's/^export DOCK_HOST=//p' "$HOME/.zshrc.local" 2>/dev/null)}"
+LOG="${XDG_STATE_HOME:-$HOME/.local/state}/dock/ci.log"
+
+LOGIN="$(gh api user -q .login)"
+LABEL="dock-${LOGIN,,}"
+VARIABLE="CI_RUNNER_${LOGIN^^}"
+
+variable() { GH_TOKEN="${WARPPCS_CI_VARIABLE_TOKEN:-${GH_TOKEN:-}}" gh variable "$@" --repo "$REPO"; }
+
+pc() { ssh -S "$DOCK_SOCK" "$DOCK_HOST" bash -s -- "$@"; }
+
+on() {
+  pc "$UNIT" "$MAX_TARGET_GIB" <<'EOF'
+set -e
+systemctl --user cat "$1" >/dev/null 2>&1 || { echo "no $1 on the PC; run ~/scripts/bootstrap" >&2; exit 1; }
+target=~/Development/actions-runner-target
+[ ! -d "$target" ] || [ "$(du -s --block-size=1G "$target" | cut -f1)" -lt "$2" ] || rm -rf "$target"
+systemctl --user start "$1"
+EOF
+  variable set "$VARIABLE" --body "[\"self-hosted\",\"$LABEL\"]"
+}
+
+##
+# Prints the ids of the unfinished runs that have an unfinished job on the PC's
+# label.
+stranded_runs() {
+  local status run
+  for status in queued in_progress; do
+    gh run list --repo "$REPO" --status "$status" --limit 100 --json databaseId -q '.[].databaseId'
+  done | sort -u | while read -r run; do
+    gh api "repos/$REPO/actions/runs/$run/jobs" --paginate \
+      -q "[.jobs[] | select(.status != \"completed\" and (.labels | index(\"$LABEL\")))] | length" |
+      grep -qvx 0 && echo "$run"
+  done
+}
+
+off() {
+  variable delete "$VARIABLE" 2>/dev/null || true
+  local runs run
+  mapfile -t runs < <(stranded_runs)
+  [ "${#runs[@]}" -gt 0 ] || return 0
+  for run in "${runs[@]}"; do
+    gh run cancel "$run" --repo "$REPO" >/dev/null || true
+  done
+  mkdir -p "${LOG%/*}"
+  setsid "$(readlink -f "$0")" requeue "${runs[@]}" >>"$LOG" 2>&1 </dev/null &
+  echo "dock-ci: cancelled run(s) ${runs[*]}; they re-run on GitHub's runners once stopped (log: $LOG)"
+}
+
+requeue() {
+  local run deadline=$((SECONDS + REQUEUE_TIMEOUT))
+  for run in "$@"; do
+    until [ "$(gh run view "$run" --repo "$REPO" --json status -q .status)" = completed ]; do
+      [ "$SECONDS" -lt "$deadline" ] || { echo "$(date -Is) run $run did not stop; not re-run"; continue 2; }
+      sleep 10
+    done
+    gh run rerun "$run" --repo "$REPO" --failed && echo "$(date -Is) re-ran run $run"
+  done
+}
+
+case "${1:-}" in
+  on) on ;;
+  off) off ;;
+  requeue) shift; requeue "$@" ;;
+  *) echo "Usage: $(basename "$0") on | off" >&2; exit 1 ;;
+esac

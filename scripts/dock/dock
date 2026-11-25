@@ -69,14 +69,15 @@ pc() { ssh -S "$SOCK" "$DOCK_HOST" bash -s -- "$@"; }
 
 ##
 # Hands everything back to the PC: closes the viewers and the idle inhibitor,
-# unloads the pulse server the laptop used and unbinds the USB devices. Runs on
-# the PC from both `dock off` and the watchdog, and does nothing when nothing is
-# docked.
+# unloads the pulse server the laptop used, stops the warppcs CI runner and
+# unbinds the USB devices. Runs on the PC from both `dock off` and the watchdog,
+# and does nothing when nothing is docked.
 read -r -d '' PC_RELEASE <<'EOF' || true
 state="/run/user/$(id -u)/dock"
 [ -s "$state/watchdog.pid" ] && kill -- -"$(cat "$state/watchdog.pid")" 2>/dev/null
 [ -f "$state/viewers.pids" ] && while read -r pid; do kill -- -"$pid"; done <"$state/viewers.pids" 2>/dev/null
 [ -s "$state/pulse-module" ] && pactl unload-module "$(cat "$state/pulse-module")"
+systemctl --user stop warppcs-runner.service 2>/dev/null
 rm -rf "$state"
 exec sudo -n dock-usb stop
 EOF
@@ -333,6 +334,16 @@ save_pc_sink() {
   echo "$sink" >"$PC_SINK_FILE"
 }
 
+##
+# Hands warppcs CI to the PC's runner while docked and back to GitHub's runners
+# on undock (~/scripts/warppcs/dock-ci). A failure there never fails the dock.
+ci() {
+  local dock_ci="$HOME/scripts/warppcs/dock-ci"
+  [ -x "$dock_ci" ] || return 0
+  step "warppcs CI"
+  "$dock_ci" "$1" || warn "could not switch warppcs CI $1"
+}
+
 usb_on() {
   step "mouse, keyboard + webcam"
   local busids
@@ -351,6 +362,7 @@ on() {
   monitors_on
   audio_on
   usb_on
+  ci on
   step "docked"
 }
 
@@ -366,6 +378,7 @@ off() {
   if [ -s "$STATE/watcher.pid" ] && [ "$(cat "$STATE/watcher.pid")" != $$ ]; then
     kill "$(cat "$STATE/watcher.pid")" 2>/dev/null || true
   fi
+  ci off
   step "mouse, keyboard + webcam"
   sudo -n dock-root usb detach || true
   step "audio"
