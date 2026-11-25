@@ -3,7 +3,10 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<EOF
-Usage: $(basename "$0") on|off|status
+Usage: $(basename "$0") on | off | shutdown | status | docked
+
+  shutdown  undock, then shut the PC down
+  docked    exit 0 when docked, 1 otherwise
 
 Docks this laptop to the PC over the network, as if its peripherals were
 plugged in here:
@@ -355,7 +358,11 @@ on() {
 # Undoes every step even when some fail, so a half-finished on or a dropped
 # connection still leaves both machines usable. Without a connection the PC's
 # watchdog has already taken its devices back, or will once the laptop is gone.
+# Given "shutdown", the PC is shut down once it has everything back; the
+# connection then drops on its own, which the remaining steps do not need.
 off() {
+  local pc_off=
+  [ "${1:-}" = shutdown ] && pc_off=1
   if [ -s "$STATE/watcher.pid" ] && [ "$(cat "$STATE/watcher.pid")" != $$ ]; then
     kill "$(cat "$STATE/watcher.pid")" 2>/dev/null || true
   fi
@@ -378,8 +385,12 @@ off() {
   step "PC"
   if connected; then
     pc <<<"$PC_RELEASE" || warn "could not hand everything back to the PC"
+    if [ -n "$pc_off" ]; then
+      ssh -S "$SOCK" "$DOCK_HOST" sudo -n dock-usb poweroff || warn "could not shut the PC down"
+    fi
   else
     warn "no connection to the PC; it takes everything back by itself ${WATCHDOG_TIMEOUT}s after losing the laptop"
+    [ -z "$pc_off" ] || warn "so it cannot be shut down either"
   fi
   step "monitors"
   if [ -f "$STATE/wayvnc.pids" ]; then xargs -r kill <"$STATE/wayvnc.pids" 2>/dev/null || true; fi
@@ -402,10 +413,12 @@ status() {
 case "${1:-}" in
   on) on ;;
   off) off ;;
+  shutdown) off shutdown ;;
   await-disconnect)
     while kill -0 "$2" 2>/dev/null && kill -0 "$3" 2>/dev/null; do sleep 2; done
     off
     ;;
   status) status ;;
+  docked) connected ;;
   *) usage ;;
 esac

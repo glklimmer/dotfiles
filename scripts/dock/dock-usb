@@ -9,6 +9,9 @@
 #                       localhost and has no authentication, so a firewall rule
 #                       keeps it reachable only through the laptop's SSH tunnel.
 #   stop                Hand every exported device back to the PC.
+#   poweroff            Shut the PC down. Polkit asks for a password when logind
+#                       is called from an SSH session, so the laptop's
+#                       `dock shutdown` goes through here.
 #
 # Wi-Fi power saving is deliberately left alone: the PC's QCA6174 (ath10k)
 # firmware times out when it is toggled at runtime and drops off the network.
@@ -102,5 +105,6 @@ stop() {
 case "${1:-}" in
   start) shift; start "$@" ;;
   stop) stop ;;
-  *) die "usage: start <vid:pid>... | stop" ;;
+  poweroff) systemctl poweroff --no-block ;;
+  *) die "usage: start <vid:pid>... | stop | poweroff" ;;
 esac
