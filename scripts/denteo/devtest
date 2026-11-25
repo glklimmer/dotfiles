@@ -5,13 +5,15 @@ usage() {
   cat >&2 <<EOF
 Usage: $(basename "$0") -s <pane>
 
-Opens the dental checkout or worktree of <pane> for testing. Unless something
-already serves its port, bin/dev starts in a 5-row pane above the window's
-claude pane (or its first pane besides mrview); a second run while it
-boots waits for that pane instead of starting another. Once the port answers,
-the app opens in a new Firefox tab: http://<DENTEO_SUBDOMAIN>.localhost:<PORT>
-from the worktree's .env.development.local, or http://localhost:3000 in the
-main checkout. Bound to prefix + t in tmux for dental panes.
+Opens the checkout or worktree of <pane> (any repo with a bin/dev, e.g. dental
+or dhc) for testing. Unless a puma of that checkout already listens, bin/dev
+starts in a 5-row pane above the window's claude pane (or its first pane
+besides mrview); a second run while it boots waits for that pane instead of
+starting another. The port is the one that checkout's puma listens on, since
+bin/dev may move off a taken port. Once it answers, the app opens in a new
+Firefox tab at http://<DENTEO_SUBDOMAIN>.localhost:<port>, the subdomain coming
+from .env.development.local when it sets one. Bound to prefix + t in tmux for
+git.panter.ch panes.
 EOF
   exit 1
 }
@@ -33,21 +35,35 @@ if ! root="$(git -C "$path" rev-parse --show-toplevel 2>/dev/null)"; then
   tmux display-message "devtest: $path is not a git checkout"
   exit 1
 fi
+if [ ! -x "$root/bin/dev" ]; then
+  tmux display-message "devtest: $root has no bin/dev"
+  exit 1
+fi
 
 env_value() {
-  sed -n "s/^$1=//p" "$root/.env.development.local" 2>/dev/null | tail -n 1 | tr -d "\"'"
+  local file="$root/.env.development.local"
+  [ -f "$file" ] || return 0
+  sed -n "s/^$1=//p" "$file" | tail -n 1 | tr -d "\"'"
 }
 
-port="$(env_value PORT)"
-port="${port:-3000}"
 subdomain="$(env_value DENTEO_SUBDOMAIN)"
-url="http://${subdomain:+$subdomain.}localhost:$port"
 
-listening() {
-  ss -ltnH "sport = :$port" | grep -q .
+# Prints the port a puma started from $root listens on, if any.
+server_port() {
+  ss -ltnpH | awk '{ addr = $4; sub(/.*:/, "", addr)
+    while (match($0, /pid=[0-9]+/)) {
+      print addr, substr($0, RSTART + 4, RLENGTH - 4); $0 = substr($0, RSTART + RLENGTH)
+    } }' |
+    while read -r port pid; do
+      [ "$(readlink "/proc/$pid/cwd" 2>/dev/null)" = "$root" ] || continue
+      tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | grep -q '^puma' || continue
+      echo "$port"
+      break
+    done
 }
 
-if ! listening; then
+port="$(server_port)"
+if [ -z "$port" ]; then
   window="$(tmux display-message -p -t "$SOURCE" '#{window_id}')"
   dev_pane="$(tmux list-panes -t "$window" -F '#{pane_id} #{@dev_root}' |
     awk -v r="$root" 'substr($0, index($0, " ") + 1) == r { print $1; exit }')"
@@ -60,15 +76,18 @@ if ! listening; then
       -P -F '#{pane_id}' "zsh -ic 'bin/dev; exec zsh'")"
     tmux set-option -p -t "$dev_pane" @dev_root "$root"
   fi
-  tmux display-message "devtest: waiting for $url"
+  tmux display-message "devtest: waiting for the server of $root"
   for _ in $(seq "$BOOT_TIMEOUT"); do
-    listening && break
+    port="$(server_port)"
+    [ -n "$port" ] && break
     sleep 1
   done
-  if ! listening; then
-    tmux display-message "devtest: nothing listens on port $port after ${BOOT_TIMEOUT}s"
+  if [ -z "$port" ]; then
+    tmux display-message "devtest: no server of $root listens after ${BOOT_TIMEOUT}s"
     exit 1
   fi
 fi
+
+url="http://${subdomain:+$subdomain.}localhost:$port"
 
 firefox --new-tab "$url" >/dev/null 2>&1 &
