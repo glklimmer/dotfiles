@@ -22,7 +22,7 @@ APT_PACKAGES=(
   zsh tmux curl unzip p7zip-full build-essential
   ripgrep fd-find fzf jq xclip wl-clipboard htop
   ffmpegthumbnailer imagemagick poppler-utils timg
-  gh
+  gh libxml2-utils
   # alacritty build deps
   cmake g++ pkg-config libfontconfig1-dev libxcb-xfixes0-dev libxkbcommon-dev python3
   # cosmic-comp build deps
