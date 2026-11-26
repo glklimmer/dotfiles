@@ -260,6 +260,31 @@ setup_thinkpad_media_keys() {
   sudo udevadm trigger --sysname-match='event*'
 }
 
+##
+# Keeps voice chat clear while builds saturate the CPU.
+#
+# Membership in the pipewire group grants the realtime priority that
+# 25-pw-rlimits.conf reserves for it, so PipeWire's audio threads run as
+# SCHED_FIFO instead of competing with builds. Takes effect at next login.
+#
+# system76-scheduler raises PipeWire clients only when it sees them through
+# PipeWire, which misses the Discord Flatpak, so Discord joins the recording
+# profile (nice -9) by process name like Mumble and Zoom.
+setup_voice_priority() {
+  step "voice chat priority"
+  id -nG "$USER" | grep -qw pipewire || sudo usermod -aG pipewire "$USER"
+  local file=/etc/system76-scheduler/process-scheduler/voice-chat.kdl
+  local content='assignments {
+	recording {
+		Discord
+	}
+}'
+  [ "$(cat "$file" 2>/dev/null)" = "$content" ] && return
+  sudo mkdir -p "${file%/*}"
+  echo "$content" | sudo tee "$file" >/dev/null
+  sudo systemctl restart com.system76.Scheduler
+}
+
 install_zsh() {
   step "zsh + oh-my-zsh"
   if [ ! -d "$HOME/.oh-my-zsh" ]; then
@@ -682,6 +707,7 @@ install_dotfiles
 setup_cosmic_panel
 disable_bluetooth_autoenable
 setup_thinkpad_media_keys
+setup_voice_priority
 install_zsh
 install_mise
 install_rust
