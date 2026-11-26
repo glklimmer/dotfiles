@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+usage() {
+  cat >&2 <<EOF2
+Usage: $(basename "$0") [-w] <kings>
+
+Waits for the warppcs host started from the current checkout to answer ppc,
+then seats bots until its lobby holds <kings> kings, the host's own included.
+With -w the host gives up its king to watch, the <kings> are all bots, and the
+match starts on its own. Gives up after two minutes without an answer. Started
+by pp -b in the background of the host's pane.
+EOF2
+  exit 1
+}
+
+watch=false
+while getopts ":wh" opt; do
+  case "$opt" in
+    w) watch=true ;;
+    *) usage ;;
+  esac
+done
+shift $((OPTIND - 1))
+[ $# -eq 1 ] && [[ "$1" =~ ^[1-9]$ ]] || usage
+kings="$1"
+
+ppc() { target/debug/ppc_console "$@" 2>/dev/null; }
+
+answered=false
+for _ in $(seq 120); do
+  if ppc fill-bots 0 | grep -q '"kings"'; then
+    answered=true
+    break
+  fi
+  sleep 1
+done
+$answered || exit 1
+
+if $watch; then
+  ppc spectate | grep -q '"spectating": true' || ppc spectate | grep -q '"spectating": true' || exit 1
+fi
+ppc fill-bots "$kings" | grep -q '"kings"' || exit 1
+if $watch; then
+  ppc start-game | grep -q '"result"' || exit 1
+fi

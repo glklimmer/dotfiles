@@ -3,28 +3,47 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<EOF
-Usage: $(basename "$0") -s <pane> [bots]
+Usage: $(basename "$0") -s <pane> [-w] [bots | b]
 
 Runs pp -b for the warppcs checkout or worktree of <pane> in a background test
 window, so the build and its logs stay out of the way. The window is opened
 right after <pane>'s window and named after it with a "▶" suffix. Each checkout
 has at most one test window: running again restarts pp there, replacing the
 previous run and its logs. The host plays against [bots] bot kings (1-8,
-default 2) instead of connecting clients. Bound to prefix + t in tmux.
+default 2) instead of connecting clients. With -w the host only watches a
+match of [bots] bots (1-9, default 3) that starts on its own; b asks for that
+count in a tmux prompt and then runs with -w. <pane> may leave out its "%",
+which a prompt template would otherwise read as a placeholder. Bound to
+prefix + t in tmux.
 EOF
   exit 1
 }
 
 SOURCE=""
-while getopts ":s:h" opt; do
+watch=false
+while getopts ":s:wh" opt; do
   case "$opt" in
     s) SOURCE="$OPTARG" ;;
+    w) watch=true ;;
     *) usage ;;
   esac
 done
 shift $((OPTIND - 1))
 [ -n "$SOURCE" ] && [ $# -le 1 ] || usage
-BOTS="${1:-2}"
+[[ "$SOURCE" =~ ^[0-9]+$ ]] && SOURCE="%$SOURCE"
+BOTS="${1:-}"
+
+if [ "$BOTS" = b ]; then
+  tmux command-prompt -1 -p "bots [3]" \
+    "run-shell -b '$(readlink -f "$0") -s ${SOURCE#%} -w %1'"
+  exit 0
+fi
+if $watch; then
+  BOTS="${BOTS:-3}"
+else
+  BOTS="${BOTS:-2}"
+fi
+[[ "$BOTS" =~ ^[1-9]$ ]] || usage
 
 path="$(tmux display-message -p -t "$SOURCE" '#{pane_current_path}')"
 if ! root="$(git -C "$path" rev-parse --show-toplevel 2>/dev/null)"; then
@@ -46,4 +65,8 @@ fi
 
 pane="$(tmux list-panes -t "$window" -F '#{pane_id}' | head -n 1)"
 tmux respawn-pane -k -t "$pane" -c "$root"
-"$(dirname "$0")/pp" -t "$pane" -b "$((BOTS + 1))"
+if $watch; then
+  "$(dirname "$0")/pp" -t "$pane" -w "$BOTS"
+else
+  "$(dirname "$0")/pp" -t "$pane" -b "$((BOTS + 1))"
+fi
