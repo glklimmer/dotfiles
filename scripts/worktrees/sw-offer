@@ -1,0 +1,15 @@
+#!/bin/zsh
+
+# Offers to save the worktree windows of every tmux session (sw) when tmux is
+# running and they differ from what was last saved. Exits non-zero when the
+# save fails, so callers that power off can abort instead of losing work.
+
+saved=${NT_STATE_FILE:-$HOME/.local/state/nt/windows}
+
+if tmux has-session 2>/dev/null &&
+  [ "$(sw -l)" != "$(cat $saved 2>/dev/null)" ] &&
+  { read -k 1 "reply?Save work (sw) first? [Y/n] "; [[ $reply != [nN] ]] }; then
+  echo
+  sw || exit
+fi
+echo

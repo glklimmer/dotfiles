@@ -1,0 +1,6 @@
+#!/bin/zsh
+
+# Reboots after offering to save the tmux worktree windows (sw-offer).
+
+sw-offer || exit
+shutdown -r 0

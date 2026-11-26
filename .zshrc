@@ -40,7 +40,6 @@ source ~/.config/zsh/muse-ansi.zsh-theme
 # alias ohmyzsh="mate ~/.oh-my-zsh"
 
 # Aliases
-alias cya="shutdown -r 0"
 alias dotfiles="/usr/bin/git --git-dir=$HOME/.dotfiles --work-tree=$HOME" 
 alias ppcassets="cd $HOME/development/warppcs/client/assets/"
 alias ppc="$HOME/development/warppcs/target/release/ppc_console"

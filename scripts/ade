@@ -1,18 +1,9 @@
 #!/bin/zsh
 
-# Shuts down, first offering to save the worktree windows of every tmux session
-# (sw) when tmux is running and they differ from what was last saved. When
+# Shuts down after offering to save the tmux worktree windows (sw-offer). When
 # docked, it undocks first and shuts the PC down too.
 
-saved=${NT_STATE_FILE:-$HOME/.local/state/nt/windows}
-
-if tmux has-session 2>/dev/null &&
-  [ "$(sw -l)" != "$(cat $saved 2>/dev/null)" ] &&
-  { read -k 1 "reply?Save work (sw) first? [Y/n] "; [[ $reply != [nN] ]] }; then
-  echo
-  sw || exit
-fi
-echo
+sw-offer || exit
 if dock docked 2>/dev/null; then
   dock shutdown
 fi
